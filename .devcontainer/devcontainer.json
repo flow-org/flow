@@ -1,0 +1,14 @@
+{
+  "name": "My Haskell",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "haskell.manageHLS": "GHCup"
+      },
+      "extensions": ["haskell.haskell"]
+    }
+  }
+}
