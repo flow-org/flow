@@ -8,6 +8,7 @@ data Node =
   ConnectorDef Node Node |
   Connection [Node] |
   ApplyBase [Node] |
-  Parens Node |
-  Application Node Node -- curried
-  deriving (Show)
+  Application Node Node | -- curried
+  SectionApplyFromRight Node Node |
+  EOF
+  deriving (Show, Eq)
