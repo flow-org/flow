@@ -29,7 +29,8 @@ library
         BaseParser,
         Parser,
         ApplyBaseParser,
-        Node
+        Node,
+        Runner
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

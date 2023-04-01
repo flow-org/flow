@@ -43,14 +43,21 @@ modifyApplyBase node = do
 o8Test :: StateT (ParseState Node) (Either (Memos Node)) Node
 o8Test = do
   headBase <- head <$> anyChar
-  head <- lift $ modifyApplyBase headBase
-  case head of
-    String _ -> return head
-    Number _ -> return head
-    Boolean _ -> return head
-    Symbol _ -> foldApplication head
-    Application _ _ -> foldApplication head
-    SectionApplyFromRight _ _ -> foldApplication head
+  headNode <- lift $ modifyApplyBase headBase
+  case headNode of
+    String _ -> return headNode
+    Number _ -> return headNode
+    Boolean _ -> return headNode
+    Symbol value -> if value `elem` ["+", "*"]
+      then do
+        tail <- many $ charNot $ node (Symbol "+") <|> node (Symbol "*") <|> node EOF
+        tailModified <- forM tail (lift . modifyApplyBase)
+        if length tailModified == 1
+          then return $ SectionApplyFromRight headNode (head tailModified)
+          else return $ foldl Application headNode tailModified
+      else foldApplication headNode
+    Application _ _ -> foldApplication headNode
+    SectionApplyFromRight _ _ -> foldApplication headNode
     _ -> returnFail
   where
     foldApplication head = do
@@ -59,13 +66,10 @@ o8Test = do
       return $ foldl Application head tailModified
 
 
-secTest = (do
+secTest = do
+  base <- o6Test
   ope <- opeTest
-  Application ope <$> baseTest) <|> (do
-    base <- o6Test
-    ope <- opeTest
-    return $ SectionApplyFromRight ope base
-  )
+  return $ Application ope base
 
 opeTest = node (Symbol "+") <|> node (Symbol "*")
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Parser where
 
 import Node
@@ -18,6 +19,11 @@ lineTest = commentTest <|> do
   optional commentTest
   return [exp]
 blankTest = char ' ' <|> char '\t'
+breakLineTest = char '\n'
+fileTest = many $ do
+  many breakLineTest
+  optional lineTest
+  many blankTest
 statementTest = useMemo "statement" $ connectorDefTest <|> connectionTest
 stringTest = useMemo "string" $ do
   char '"'
@@ -70,9 +76,9 @@ connectorDefTest = useMemo "connectorDef" $ do
   oneOrMore blankTest
   ConnectorDef connector <$> connectionTest
 
-parseLine line = evalStateT lineTest (0, initMemos, line)
-process line = case parseLine line of
-  Right (node:_) -> case node of
+parseFile file = evalStateT lineTest (0, initMemos, file)
+parse file = case parseFile file of
+  Right nodes -> forM nodes $ \case
     ConnectorDef connector (Connection nodes) -> do
       modifiedNodes <- forM nodes modifyApplyBase
       return $ ConnectorDef connector (Connection modifiedNodes)
@@ -81,6 +87,3 @@ process line = case parseLine line of
       return $ Connection modifiedNodes
     _ -> Left initMemos 
   _ -> Left initMemos
-
-parse = process
-
