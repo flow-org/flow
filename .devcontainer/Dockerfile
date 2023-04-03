@@ -12,4 +12,6 @@ ENV PATH "/root/.cabal/bin:/root/.ghcup/bin:$PATH"
 RUN ghcup install ghc recommended --set \
   && ghcup install cabal recommended --set \
   && ghcup install hls recommended --set
-# todo: cabal update
+
+RUN cabal update
+RUN apt-get install -y git

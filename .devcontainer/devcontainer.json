@@ -1,8 +1,6 @@
 {
   "name": "My Haskell",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "image": "my-haskell",
   "customizations": {
     "vscode": {
       "settings": {
