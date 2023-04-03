@@ -7,7 +7,7 @@ import Control.Monad.State
 import ApplyBaseParser (modifyApplyBase)
 
 -- texts which cannot be used for symbols
-reserved = ["<<", ">>", "<>", "-<"]
+reserved = ["<<", ">>", "<>", "-<", "$"]
 
 commentTest = do
   char '#'
@@ -32,6 +32,7 @@ fileTest = do
       return exp) <|> (do
         oneOrMore blankTest
         return [])
+  breakLineTest
   char '$'
   return $ head ++ tail
 statementTest = useMemo "statement" $ connectorDefTest <|> connectionTest
@@ -94,7 +95,7 @@ connectorDefTest = useMemo "connectorDef" $ do
   ConnectorDef connector <$> connectionTest
 
 parseFile file = evalStateT fileTest (0, initMemos, file)
-parse file = case parseFile (file ++ "$") of
+parse file = case parseFile (file ++ "\n$") of
   Right nodes -> forM nodes $ \case
     ConnectorDef connector (Connection nodes) -> do
       modifiedNodes <- forM nodes modifyApplyBase
