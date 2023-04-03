@@ -7,7 +7,7 @@ import Control.Monad.State
 import ApplyBaseParser (modifyApplyBase)
 
 -- texts which cannot be used for symbols
-reserved = ["<<", "-<"]
+reserved = ["<<", ">>", "<>", "-<"]
 
 commentTest = do
   char '#'
@@ -72,11 +72,18 @@ expTest = useMemo "exp" $ applyBaseTest <|> valueTest
 
 connectionTest = useMemo "connection" $ do
   head <- expTest
-  tail <- manyOnes $ do
+  tail <- many $ do
     oneOrMore blankTest
-    string "<<"
+    connection <- (do
+      string "<<"
+      return R2L) <|> (do
+        string "<>"
+        return Bi) <|> (do
+          string ">>"
+          return L2R)
     oneOrMore blankTest
-    expTest
+    exp <- expTest
+    return [Bind connection, exp]
   return $ Connection $ head:tail
 
 connectorDefTest = useMemo "connectorDef" $ do

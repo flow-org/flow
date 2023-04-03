@@ -2,9 +2,18 @@ class Pipe {
   constructor() {
     this.listeners = [];
   }
-  onChange(value) {}
+  onChange(value) { }
   connect(to) {
     to.listeners.push((value) => this.onChange(value));
+    return this;
+  }
+  connected(from) {
+    this.listeners.push((value) => from.onChange(value));
+    return this;
+  }
+  biconnect(partner) {
+    this.connect(partner);
+    this.connected(partner);
     return this;
   }
 }
@@ -30,7 +39,12 @@ class Input extends Pipe {
       elem.addEventListener("input", (e) => {
         this.listeners.forEach((listener) => listener(e.target.value));
       });
+      this.wrapper = wrapper;
+      this.elem = elem;
     }
+  }
+  onChange(value) {
+    this.elem.value = value;
   }
 }
 

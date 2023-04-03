@@ -27,12 +27,20 @@ toJS node = case node of
   ConnectorDef (Symbol connectorName) connection ->
     "const " ++ connectorName ++ " = () => " ++ toJS connection
   Connection connections ->
-    foldr1 (\a b -> a ++ ".connect(" ++ b ++ ")") $ map toJS connections
+    -- foldr1 (\a b -> a ++ ".connect(" ++ b ++ ")") $ map toJS connections
+    let toJSed = map toJS connections
+        (result, lastState) = foldr (\a (b, parseState) -> case parseState of
+          0 -> ("." ++ a ++ "(" ++ b ++ ")", 1)
+          1 -> (a ++ b, 0)) (last toJSed, 0) (init toJSed) in
+        result -- todo: should check lastState
   Application (Symbol fnName) _ | fnName `elem` primitives
     -> toJSExp node
   Application _ _ -> "new FromFunc(" ++ toJSExp node ++ ")"
   SectionApplyFromRight _ _ -> "new FromFunc(" ++ toJSExp node ++ ")"
   Symbol value -> value ++ "()"
+  Bind R2L -> "connect"
+  Bind L2R -> "connected"
+  Bind Bi -> "biconnect"
 
 toJSExp :: Node -> [Char]
 toJSExp node = case node of
