@@ -10,26 +10,47 @@ class Pipe {
 }
 
 class Input extends Pipe {
-  constructor() {
+  constructor(id) {
     super();
-    const elem = document.createElement("input");
-    elem.type = "text";
-    document.body.appendChild(elem);
-    elem.addEventListener("input", (e) => {
-      this.listeners.forEach((listener) => listener(e.target.value));
-    });
+    this.id = id;
+    const elemId = `input-${id}`;
+    const existed = document.getElementById(elemId);
+    if (existed) {
+      existed.addEventListener("input", (e) => {
+        this.listeners.forEach((listener) => listener(e.target.value));
+      });
+    } else {
+      const wrapper = document.createElement("p");
+      wrapper.textContent = id === 'default' ? '' : `${id}: `;
+      const elem = document.createElement("input");
+      elem.type = "text";
+      elem.id = elemId;
+      wrapper.appendChild(elem);
+      document.body.appendChild(wrapper);
+      elem.addEventListener("input", (e) => {
+        this.listeners.forEach((listener) => listener(e.target.value));
+      });
+    }
   }
 }
 
 class Output extends Pipe {
-  constructor() {
+  constructor(id) {
     super();
-    const elem = document.createElement("div");
-    document.body.appendChild(elem);
-    this.elem = elem;
+    this.id = id;
+    const elemId = `output-${id}`;
+    const existed = document.getElementById(elemId);
+    if (existed) {
+      this.elem = existed;
+    } else {
+      const elem = document.createElement("div");
+      elem.id = elemId;
+      document.body.appendChild(elem);
+      this.elem = elem;
+    }
   }
   onChange(value) {
-    this.elem.textContent = value;
+    this.elem.textContent = this.id === 'default' ? value : `${this.id}: ${value}`;
   }
 }
 class FromFunc extends Pipe {
@@ -42,5 +63,5 @@ class FromFunc extends Pipe {
     this.listeners.forEach((listener) => listener(calculated));
   }
 }
-const input = new Input();
-const output = new Output();
+const input = (id = "default") => new Input(id);
+const output = (id = "default") => new Output(id);

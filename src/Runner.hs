@@ -19,23 +19,28 @@ preludeJS = do
   content <- TextIO.readFile "static/runtime.js"
   return $ Text.unpack content
 
+primitives = ["input", "output"]
+reservedSymbols = Map.fromList [("+", "((a) => (b) => a + b)")]
+
 toJS :: Node -> [Char]
 toJS node = case node of
   ConnectorDef (Symbol connectorName) connection ->
-    "const " ++ connectorName ++ " = " ++ toJS connection
+    "const " ++ connectorName ++ " = () => " ++ toJS connection
   Connection connections ->
     foldr1 (\a b -> a ++ ".connect(" ++ b ++ ")") $ map toJS connections
+  Application (Symbol fnName) _ | fnName `elem` primitives
+    -> toJSExp node
   Application _ _ -> "new FromFunc(" ++ toJSExp node ++ ")"
   SectionApplyFromRight _ _ -> "new FromFunc(" ++ toJSExp node ++ ")"
-  Symbol value -> value
-
-reservedSymbols = Map.fromList [("+", "((a) => (b) => a + b)")]
+  Symbol value -> value ++ "()"
 
 toJSExp :: Node -> [Char]
 toJSExp node = case node of
   String value -> show value
   Number value -> show value
   Boolean value -> if value then "true" else "false"
-  Symbol value -> fromMaybe value $ Map.lookup value reservedSymbols
-  Application fn arg -> toJSExp fn ++ "(" ++ toJSExp arg ++ ")"
+  Symbol value -> fromMaybe (value ++ "()") $ Map.lookup value reservedSymbols
+  Application fn arg -> (case fn of
+    Symbol value -> fromMaybe value $ Map.lookup value reservedSymbols -- no ()
+    _ -> toJSExp fn) ++ "(" ++ toJSExp arg ++ ")"
   SectionApplyFromRight fn arg -> "((a) => " ++ toJSExp fn ++ "(a)(" ++ toJSExp arg ++ "))"

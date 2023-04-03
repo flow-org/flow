@@ -20,10 +20,20 @@ lineTest = commentTest <|> do
   return [exp]
 blankTest = char ' ' <|> char '\t'
 breakLineTest = char '\n'
-fileTest = many $ do
-  many breakLineTest
-  optional lineTest
+fileTest = do
+  many $ breakLineTest <|> blankTest
+  head <- lineTest
   many blankTest
+  tail <- many $ do
+    oneOrMore breakLineTest
+    (do
+      exp <- lineTest
+      many blankTest
+      return exp) <|> (do
+        oneOrMore blankTest
+        return [])
+  char '$'
+  return $ head ++ tail
 statementTest = useMemo "statement" $ connectorDefTest <|> connectionTest
 stringTest = useMemo "string" $ do
   char '"'
@@ -76,8 +86,8 @@ connectorDefTest = useMemo "connectorDef" $ do
   oneOrMore blankTest
   ConnectorDef connector <$> connectionTest
 
-parseFile file = evalStateT lineTest (0, initMemos, file)
-parse file = case parseFile file of
+parseFile file = evalStateT fileTest (0, initMemos, file)
+parse file = case parseFile (file ++ "$") of
   Right nodes -> forM nodes $ \case
     ConnectorDef connector (Connection nodes) -> do
       modifiedNodes <- forM nodes modifyApplyBase
