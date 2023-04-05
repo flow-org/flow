@@ -15,3 +15,5 @@ RUN ghcup install ghc recommended --set \
 
 RUN cabal update
 RUN apt-get install -y git
+# for vscode ext
+RUN ghcup install stack 2.9.3 --set
