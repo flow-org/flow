@@ -12,5 +12,6 @@ data Node =
   ApplyBase [Node] |
   Application Node Node | -- curried
   SectionApplyFromRight Node Node |
+  Bypass Node Node |
   EOF
   deriving (Show, Eq)

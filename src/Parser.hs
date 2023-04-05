@@ -4,10 +4,10 @@ module Parser where
 import Node
 import BaseParser
 import Control.Monad.State
-import ApplyBaseParser (modifyApplyBase)
+import ApplyBaseParser (modifyApplyBase, modifyApplyBaseForStatements)
 
 -- texts which cannot be used for symbols
-reserved = ["<<", ">>", "<>", "-<", "$"]
+reserved = ["<|", "|>", "<->", "-<", "<-", "|", "->", "$"]
 
 commentTest = do
   char '#'
@@ -75,17 +75,30 @@ connectionTest = useMemo "connection" $ do
   head <- expTest
   tail <- many $ do
     oneOrMore blankTest
-    connection <- (do
-      string "<<"
+    connection <- (Bind <$> (do
+      string "<-"
       return R2L) <|> (do
-        string "<>"
+        string "<->"
         return Bi) <|> (do
-          string ">>"
-          return L2R)
+          string "->"
+          return L2R)) <|> bypassTest
     oneOrMore blankTest
     exp <- expTest
-    return [Bind connection, exp]
+    return [connection, exp]
   return $ Connection $ head:tail
+
+bypassTest :: StateT (Int, Memos Char, [Char]) (Either (Memos Char)) Node
+bypassTest = useMemo "bypass" $ do
+  string "<|"
+  oneOrMore blankTest
+  r2l <- connectionTest
+  oneOrMore blankTest
+  string "|"
+  oneOrMore blankTest
+  l2r <- connectionTest
+  oneOrMore blankTest
+  string "|>"
+  return $ Bypass r2l l2r
 
 connectorDefTest = useMemo "connectorDef" $ do
   connector <- symbolTest
@@ -96,12 +109,5 @@ connectorDefTest = useMemo "connectorDef" $ do
 
 parseFile file = evalStateT fileTest (0, initMemos, file)
 parse file = case parseFile (file ++ "\n$") of
-  Right nodes -> forM nodes $ \case
-    ConnectorDef connector (Connection nodes) -> do
-      modifiedNodes <- forM nodes modifyApplyBase
-      return $ ConnectorDef connector (Connection modifiedNodes)
-    Connection nodes -> do
-      modifiedNodes <- forM nodes modifyApplyBase
-      return $ Connection modifiedNodes
-    _ -> Left initMemos 
+  Right nodes -> modifyApplyBaseForStatements nodes
   _ -> Left initMemos

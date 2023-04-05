@@ -28,6 +28,7 @@ class Input extends Pipe {
       existed.addEventListener("input", (e) => {
         this.listeners.forEach((listener) => listener(e.target.value));
       });
+      this.elem = existed;
     } else {
       const wrapper = document.createElement("p");
       wrapper.textContent = id === 'default' ? '' : `${id}: `;
