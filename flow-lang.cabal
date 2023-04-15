@@ -28,7 +28,6 @@ library
     other-modules:
         BaseParser,
         Parser,
-        ApplyBaseParser,
         Node,
         Runner,
         PipelineProcessor
