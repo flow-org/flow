@@ -30,7 +30,8 @@ library
         Parser,
         ApplyBaseParser,
         Node,
-        Runner
+        Runner,
+        PipelineProcessor
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

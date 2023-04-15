@@ -1,13 +1,13 @@
-{-# LANGUAGE LambdaCase #-}
 module Parser where
 
 import Node
 import BaseParser
 import Control.Monad.State
-import ApplyBaseParser (modifyApplyBase, modifyApplyBaseForStatements)
+import PipelineProcessor (processPipeline)
+-- import ApplyBaseParser (modifyApplyBase, modifyApplyBaseForStatements)
 
 -- texts which cannot be used for symbols
-reserved = ["<|", "|>", "<->", "-<", "<-", "|", "->", "$"]
+reserved = ["<(", ")>", "=", "<->", "<-", "|", "->", "$"]
 
 commentTest = do
   char '#'
@@ -35,26 +35,50 @@ fileTest = do
   breakLineTest
   char '$'
   return $ head ++ tail
-statementTest = useMemo "statement" $ connectorDefTest <|> connectionTest
+statementTest = useMemo "statement" $ defTest <|> pipelineTest
 stringTest = useMemo "string" $ do
   char '"'
   text <- many $ (do
     char '\\'
     anyChar) <|> charNot (char '\\' <|> char '"' <|> char '\n')
   char '"'
-  return $ String text
+  return $ Value $ String text
 numberTest = useMemo "number" $ do
   text <- oneOrMore digit
-  return $ Number (read text :: Int)
+  return $ Value $ Number (read text :: Int)
 booleanTest = useMemo "boolean" $ (do
   string "true"
-  return $ Boolean True) <|> do
+  return $ Value $ Boolean True) <|> do
     string "false"
-    return $ Boolean False
+    return $ Value $ Boolean False
 symbolTest = useMemo "symbol" $ do
   text <- oneOrMore $ charNot $ char ' ' <|> char '\n' <|> char '(' <|> char ')'
   when (text `elem` reserved) returnFail
-  return $ Symbol text
+  return $ Value $ Symbol text
+refTest = useMemo "ref" $ do
+  char '@'
+  symbol <- symbolTest
+  case symbol of
+    Value (Symbol name) -> return $ Value $ Ref $ GeneralRef name
+additionalParamTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
+additionalParamTest = useMemo "additionalParam" $ (do
+  char '('
+  many blankTest
+  paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
+  oneOrMore blankTest
+  exp <- expTest -- todo: pipeline
+  many blankTest
+  char ')'
+  return $ AdditionalParam exp paramType R False) <|> (do
+    char '('
+    many blankTest
+    exp <- expTest -- todo: pipeline
+    oneOrMore blankTest
+    -- <- and -> are not exp.
+    paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
+    many blankTest
+    char ')'
+    return $ AdditionalParam exp paramType L False)
 parensTest = useMemo "parens" $ do
   char '('
   many blankTest
@@ -62,52 +86,86 @@ parensTest = useMemo "parens" $ do
   many blankTest
   char ')'
   return exp
-valueTest = useMemo "value" $ stringTest <|> numberTest <|> booleanTest <|> symbolTest <|> parensTest
+valueTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
+valueTest = useMemo "value" $
+  stringTest <|>
+  numberTest <|>
+  booleanTest <|>
+  refTest <|>
+  symbolTest <|>
+  parensTest
+applyBaseTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
 applyBaseTest = useMemo "applyBase" $ do
   head <- valueTest
   tail <- manyOnes $ do
     oneOrMore blankTest
-    valueTest
+    valueTest <|> additionalParamTest
   return $ ApplyBase $ head:tail
 expTest = useMemo "exp" $ applyBaseTest <|> valueTest
+machineTest = useMemo "machine" $ do
+  string "machine"
+  oneOrMore blankTest
+  params <- manyOnes $ do
+    oneOrMore blankTest
+    machineParamTest
+  (do many blankTest; char '\n') <|> oneOrMore blankTest
+  many blankTest
+  head <- pipelineTest
+  tail <- manyOnes $ do
+    many blankTest
+    char '\n'
+    many blankTest
+    pipelineTest
+  return $ Machine params (head:tail)
+  -- todo
+machineParamTest = useMemo "machineParam" $ do
+  char '('
+  paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
+  params <- manyOnes $ do
+    oneOrMore blankTest
+    refTest <|> symbolTest
+  return $ MachineParam paramType params
 
-connectionTest = useMemo "connection" $ do
+pipelineTest = useMemo "pipeline" $ do
   head <- expTest
   tail <- many $ do
     oneOrMore blankTest
     connection <- (Bind <$> (do
       string "<-"
-      return R2L) <|> (do
+      return $ Direction R2L) <|> (do
         string "<->"
         return Bi) <|> (do
           string "->"
-          return L2R)) <|> bypassTest
+          return $ Direction L2R)) <|> bypassTest
     oneOrMore blankTest
     exp <- expTest
     return [connection, exp]
-  return $ Connection $ head:tail
+  return $ Pipeline $ head:tail
 
-bypassTest :: StateT (Int, Memos Char, [Char]) (Either (Memos Char)) Node
+bypassTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
 bypassTest = useMemo "bypass" $ do
-  string "<|"
+  string "<("
   oneOrMore blankTest
-  r2l <- connectionTest
+  r2l <- pipelineTest
   oneOrMore blankTest
   string "|"
   oneOrMore blankTest
-  l2r <- connectionTest
+  l2r <- pipelineTest
   oneOrMore blankTest
-  string "|>"
+  string ")>"
   return $ Bypass r2l l2r
 
-connectorDefTest = useMemo "connectorDef" $ do
+defTest = useMemo "def" $ do
   connector <- symbolTest
   oneOrMore blankTest
-  string "-<"
+  string "="
   oneOrMore blankTest
-  ConnectorDef connector <$> connectionTest
+  Def connector <$> pipelineTest
 
-parseFile file = evalStateT fileTest (0, initMemos, file)
+parseFile file = evalStateT fileTest (0, initMemos, file, ())
+parse_ file = case parseFile (file ++ "\n$") of
+  Right nodes -> Right nodes
+  _ -> Left initMemos
 parse file = case parseFile (file ++ "\n$") of
-  Right nodes -> modifyApplyBaseForStatements nodes
+  Right [Pipeline nodes] -> Right $ runStateT (processPipeline nodes) 0
   _ -> Left initMemos

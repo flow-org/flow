@@ -16,41 +16,41 @@ addMemo memos i label result = Map.insert (i, label) result memos
 initMemos :: Memos t
 initMemos = Map.empty
 
-type ParseState t = (Int, Memos t, [t])
+type ParseState t u = (Int, Memos t, [t], u)
 useMemo :: (Ord t) => [t]
-  -> StateT (ParseState t) (Either (Memos t)) Node
-  -> StateT (ParseState t) (Either (Memos t)) Node
-useMemo label p = StateT $ \(i, memos, xs) -> case findMemo memos i label of
-  Just (Just (i', node)) -> Right (node, (i', memos, drop (i' - i) xs))
+  -> StateT (ParseState t u) (Either (Memos t)) Node
+  -> StateT (ParseState t u) (Either (Memos t)) Node
+useMemo label p = StateT $ \(i, memos, xs, extra) -> case findMemo memos i label of
+  Just (Just (i', node)) -> Right (node, (i', memos, drop (i' - i) xs, extra))
   Just Nothing -> Left memos
-  Nothing -> case runStateT p (i, memos, xs) of
+  Nothing -> case runStateT p (i, memos, xs, extra) of
     Left memos -> Left (addMemo memos i label Nothing)
-    Right (a, (i', memos, xs)) -> Right (a, (i', addMemo memos i label (Just (i', a)), xs))
+    Right (a, (i', memos, xs, extra)) -> Right (a, (i', addMemo memos i label (Just (i', a)), xs, extra))
 
-(StateT a) <|> (StateT b) = StateT $ \(i, memos, xs) -> case a (i, memos, xs) of
-    Left memos -> b (i, memos, xs)
+(StateT a) <|> (StateT b) = StateT $ \(i, memos, xs, extra) -> case a (i, memos, xs, extra) of
+    Left memos -> b (i, memos, xs, extra)
     y -> y
 
-forward :: Int -> StateT (ParseState t) (Either (Memos t)) ()
+forward :: Int -> StateT (ParseState t u) (Either (Memos t)) ()
 forward i' = do
-  (i, memos, text) <- get
-  put (i + i', memos, drop i' text)
+  (i, memos, text, extra) <- get
+  put (i + i', memos, drop i' text, extra)
 
 string s = do
-  (_, memos, xs) <- get
+  (_, memos, xs, _) <- get
   unless (s `isPrefixOf` xs) $ lift $ Left memos
   forward $ length s
   return s
 
-guardText :: StateT (ParseState t) (Either (Memos t)) (t, [t])
+guardText :: StateT (ParseState t u) (Either (Memos t)) (t, [t])
 guardText = do
-  (i, memos, text) <- get
+  (i, memos, text, _) <- get
   when (null text) $ lift $ Left memos
   return (head text, tail text)
 
-returnFail :: StateT (ParseState t) (Either (Memos t)) u
+returnFail :: StateT (ParseState t u) (Either (Memos t)) v
 returnFail = do
-  (_, memos, _) <- get
+  (_, memos, _, _) <- get
   lift $ Left memos
 
 digit = do
@@ -59,19 +59,21 @@ digit = do
   forward 1
   return [x]
 
+many :: StateT (ParseState t u) (Either (Memos t)) [a] -> StateT (ParseState t u) (Either (Memos t)) [a]
 many p = StateT inner where
   inner s = case runStateT p s of
     Right (x', s') -> case runStateT (many p) s' of
       Right (x'', s'') -> Right (x' ++ x'', s'')
-      Left memos -> let (i', _, xs') = s' in Right (x', (i', memos, xs'))
-    Left memos -> let (i, _, xs) = s in Right ([], (i, memos, xs))
+      Left memos -> let (i', _, xs', extra) = s' in Right (x', (i', memos, xs', extra))
+    Left memos -> let (i, _, xs, extra) = s in Right ([], (i, memos, xs, extra))
 
+manyOnes :: StateT (ParseState t u) (Either (Memos t)) a -> StateT (ParseState t u) (Either (Memos t)) [a]
 manyOnes p = StateT inner where
   inner s = case runStateT p s of
     Right (x', s') -> case runStateT (manyOnes p) s' of
       Right (x'', s'') -> Right (x':x'', s'')
-      Left memos -> let (i', _, xs') = s' in Right ([x'], (i', memos, xs'))
-    Left memos -> let (i, _, xs) = s in Right ([], (i, memos, xs))
+      Left memos -> let (i', _, xs', extra) = s' in Right ([x'], (i', memos, xs', extra))
+    Left memos -> let (i, _, xs, extra) = s in Right ([], (i, memos, xs, extra))
 
 oneOrMore p = do
   x <- p
@@ -96,8 +98,8 @@ charNot p = do
     Left memos -> do
       forward 1
       return [x]
-    Right (_, (_, memos, _)) -> returnFail
+    Right (_, (_, memos, _, _)) -> returnFail
 
 optional p = StateT $ \s -> case runStateT p s of
-  Left memos -> let (i, _, text) = s in Right ([], (i, memos, text))
+  Left memos -> let (i, _, text, extra) = s in Right ([], (i, memos, text, extra))
   Right x -> Right x
