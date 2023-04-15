@@ -38,8 +38,17 @@ processPipeline (ApplyBase ns1:Bind (Direction dir):ApplyBase ns2:tail) = do
 processMachineRun :: [Node] -> Maybe Node -> Maybe Node -> StateT Int (Either String) [SemanticStructure]
 processMachineRun ns ext1 ext2 = do
   nextRef <- get
-  let exts = catMaybes [ext1, ext2]
-  processApplyBase (ns ++ exts)
+  processed <- processApplyBase ns
+  case head processed of
+    MachineRun mRef params -> do
+      let exts = catMaybes [ext1, ext2]
+      return $ foldl appendParamToMachineRun (head processed) exts : tail processed
+
+-- O(n)
+appendParamToMachineRun :: SemanticStructure -> Node -> SemanticStructure
+appendParamToMachineRun (MachineRun mRef params) (AdditionalParam (ApplyBase [Value value]) paramType pos True) =
+  let maxParam = maximum $ -1 : map (\(Param _ pType i _) -> if pType == paramType then i else -1) params in
+    MachineRun mRef $ toApplyParam (maxParam + 1) (AdditionalParam (ApplyBase [Value value]) paramType pos True) : params
 
 type ApplyBaseParseState = ParseState Node (Int, [SemanticStructure])
 processApplyBase :: [Node] -> StateT Int (Either String) [SemanticStructure]
@@ -71,7 +80,7 @@ node n = do
 
 nodeLookAhead n = do
   (head, _) <- guardText -- not text here
-  unless (head == n) returnFail
+  return $ head == n
 
 baseTest :: StateT ApplyBaseParseState (Either (Memos Node)) SemanticStructure
 baseTest = (do
@@ -83,14 +92,14 @@ baseTest = (do
   --   node EOF
   --   return n
 
-nodesToSemanticStructureM (head:tail) additionals = do
+nodesToSemanticStructureM (head:tail) = do
   let len = length (head:tail)
   folded <- foldM (\a b -> case a of
     (_, nodes, 0, i) -> return (Nothing, b : nodes, 1, i + 1) -- b: operator
     (Nothing, nodes, 1, i) -> do
       if i == len - 1 then do
         state <- get
-        case runStateT (resolveMachineRun $ nodes ++ b:additionals) state of
+        case runStateT (resolveMachineRun $ nodes ++ [b]) state of
           Left error -> trace error returnFail -- todo
           Right (headStructure, state) -> do
             put state
@@ -121,22 +130,24 @@ oTest nextTest operatorsTest = do
     exp <- nextTest
     case exp of
       SSValue value -> return [symbol, Value value]
+      MachineRun {} -> do
+        ref <- getCurrentRef
+        setCurrentRef (ref + 1)
+        let newRef = Value $ Ref $ DirectedRef $ "__" ++ show ref
+        pushStructures [appendParamToMachineRun exp (AdditionalParam (ApplyBase [newRef]) Out R True)]
+        return [symbol, newRef]
       _ -> returnFail
   if null tail then return head else do
-    lastAdditionalParams <- do
-      params <- manyOnes $ do
-        (n, _) <- guardText
-        case n of
-          AdditionalParam {} -> do
-            forward 1
-            return n
-          _ -> returnFail
-      nodeLookAhead EOF
-      return params
     headNode <- case head of
       SSValue value -> return $ Value value
-      _ -> returnFail -- machine argument in operator is currently prohibited.
-    nodesToSemanticStructureM (headNode:tail) lastAdditionalParams
+      MachineRun {} -> do
+        ref <- getCurrentRef
+        setCurrentRef (ref + 1)
+        let newRef = Value $ Ref $ DirectedRef $ "__" ++ show ref
+        pushStructures [appendParamToMachineRun head (AdditionalParam (ApplyBase [newRef]) Out R True)]
+        return newRef
+      _ -> trace (show head) returnFail -- machine argument in operator is currently prohibited.
+    nodesToSemanticStructureM (headNode:tail)
 
 o6Operators = node (Value (Symbol "+")) <|> node (Value (Symbol "-"))
 o6Test :: StateT ApplyBaseParseState (Either (Memos Node)) SemanticStructure
@@ -238,14 +249,10 @@ resolveMachineRun ns = do
     case position of
       R -> do
         unless (torelance || is) $ lift $ Left $ "AdditionalParam appeared before machine: " ++ show value
-        let direction = (case paramType of In -> R2L; Out -> L2R)
-        i <- getNextIndex paramType
-        addParam $ Param direction paramType i value
       L -> do
         when (is && not torelance) $ lift $ Left $ "AdditionalParam appeared after machine: " ++ show value
-        let direction = (case paramType of In -> L2R; Out -> R2L)
-        i <- getNextIndex paramType
-        addParam $ Param direction paramType i value
+    i <- getNextIndex paramType
+    addParam $ toApplyParam i (AdditionalParam (ApplyBase [Value value]) paramType position torelance)
   handleMachine :: MachineRef -> StateT MachineRunParseState (Either String) ()
   handleMachine machine = do
     oldMachine <- getMachine
@@ -261,5 +268,14 @@ resolveMachineRun ns = do
         appendByproducts sss
         putNextRef ref
     handleValue newRef
+
+toApplyParam nextIndex (AdditionalParam (ApplyBase [Value value]) paramType position torelance) =
+  case position of
+    R -> do
+      let direction = (case paramType of In -> R2L; Out -> L2R) in
+        Param direction paramType nextIndex value
+    L -> do
+      let direction = (case paramType of In -> L2R; Out -> R2L) in
+        Param direction paramType nextIndex value
 
 opeTest = o6Operators <|> o7Operators
