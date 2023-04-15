@@ -51,6 +51,7 @@ processApplyBase nodes = do
       put newRefIndex
       return $ ss : byproducts
 
+getCurrentRef :: StateT ApplyBaseParseState (Either t) Int
 getCurrentRef = do
   (_, _, _, (next, _)) <- get
   return next
@@ -83,22 +84,34 @@ baseTest = (do
   --   return n
 
 nodesToSemanticStructureM (head:tail) additionals = do
-  trace (show $ head:tail) return 0
+  let len = length (head:tail)
   folded <- foldM (\a b -> case a of
-    (_, nodes, 0) -> return (Nothing, b : nodes, 1) -- b: operator
-    (Nothing, nodes, 1) -> do
-      state <- get
-      case runStateT (resolveMachineRun (nodes ++ [b])) state of
-        Left error -> returnFail -- todo
-        Right (headStructure, state) -> do
-          put state
-          trace (show headStructure) return 0
-          case headStructure of
-            SSValue value -> return (Just headStructure, [Value value], 0)
-            _ -> return (Just headStructure, [], 0) -- error unless this is last element
-    ) (Nothing, [head], 0) tail
+    (_, nodes, 0, i) -> return (Nothing, b : nodes, 1, i + 1) -- b: operator
+    (Nothing, nodes, 1, i) -> do
+      if i == len - 1 then do
+        state <- get
+        case runStateT (resolveMachineRun $ nodes ++ b:additionals) state of
+          Left error -> trace error returnFail -- todo
+          Right (headStructure, state) -> do
+            put state
+            return (Just headStructure, [], 0, i + 1)
+      else do
+        ref <- getCurrentRef
+        setCurrentRef (ref + 1)
+        state <- get
+        let newRef = ApplyBase [Value $ Ref $ DirectedRef $ "__" ++ show ref]
+        case runStateT (resolveMachineRun $ nodes ++ b:[AdditionalParam newRef Out R True]) state of
+          Left error -> trace error returnFail -- todo
+          Right (headStructure, state) -> do
+            put state
+            case headStructure of
+              SSValue value -> return (Just headStructure, [Value value], 0, i + 1)
+              MachineRun {} -> do
+                pushStructures [headStructure]
+                return (Nothing, [AdditionalParam newRef In L True], 0, i + 1)
+    ) (Nothing, [head], 0, 1) tail
   case folded of
-    (Just structure, _, _) -> return structure
+    (Just structure, _, _, _) -> return structure
     _ -> returnFail
 
 oTest nextTest operatorsTest = do
@@ -123,8 +136,7 @@ oTest nextTest operatorsTest = do
     headNode <- case head of
       SSValue value -> return $ Value value
       _ -> returnFail -- machine argument in operator is currently prohibited.
-    a <- nodesToSemanticStructureM (headNode:tail) lastAdditionalParams
-    trace (show a) return a
+    nodesToSemanticStructureM (headNode:tail) lastAdditionalParams
 
 o6Operators = node (Value (Symbol "+")) <|> node (Value (Symbol "-"))
 o6Test :: StateT ApplyBaseParseState (Either (Memos Node)) SemanticStructure
