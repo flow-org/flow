@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module PipelineProcessor where
 
 import Node
@@ -24,16 +25,34 @@ processPipeline (ApplyBase [Value (Ref r1)]:Bind bindType:ApplyBase [Value (Ref 
   (RefConnect r1 bindType r2:) <$> processPipeline (ApplyBase [Value (Ref r2)]:tail)
 processPipeline [ApplyBase [Value (Ref ref)], Bind (Direction dir), ApplyBase ns] = do
   processMachineRun ns (Just $ toAdditionalParam L dir ref) Nothing
+processPipeline [ApplyBase [Value (Ref ref)], Bind (Direction dir), Machine params pipelines] = do
+  processMachineDef (Machine params pipelines) (Just $ toAdditionalParam L dir ref) Nothing
 processPipeline (ApplyBase [Value (Ref r1)]:Bind (Direction dir1):ApplyBase ns:Bind (Direction dir2):tail) = do
   newRef <- getNewRef
   head <- processMachineRun ns (Just $ toAdditionalParam L dir1 r1) (Just $ toAdditionalParam R dir2 newRef)
   (head ++) <$> processPipeline (ApplyBase [Value (Ref newRef)]:Bind (Direction dir2):tail)
+processPipeline (ApplyBase [Value (Ref r1)]:Bind (Direction dir1):Machine params pipelines:Bind (Direction dir2):tail) = do
+  newRef <- getNewRef
+  head <- processMachineDef (Machine params pipelines) (Just $ toAdditionalParam L dir1 r1) (Just $ toAdditionalParam R dir2 newRef)
+  (head ++) <$> processPipeline (ApplyBase [Value (Ref newRef)]:Bind (Direction dir2):tail)
 processPipeline (ApplyBase ns:Bind (Direction dir):ApplyBase [Value (Ref ref)]:tail) = do
   head <- processMachineRun ns (Just $ toAdditionalParam R dir ref) Nothing
+  (head ++) <$> processPipeline (ApplyBase [Value (Ref ref)]:tail)
+processPipeline (Machine params pipelines:Bind (Direction dir):ApplyBase [Value (Ref ref)]:tail) = do
+  head <- processMachineDef (Machine params pipelines) (Just $ toAdditionalParam R dir ref) Nothing
   (head ++) <$> processPipeline (ApplyBase [Value (Ref ref)]:tail)
 processPipeline (ApplyBase ns1:Bind (Direction dir):ApplyBase ns2:tail) = do
   newRef <- getNewRef
   processPipeline (ApplyBase ns1:Bind (Direction dir):ApplyBase [Value (Ref newRef)]:Bind (Direction dir):ApplyBase ns2:tail)
+processPipeline (Machine params pipelines:Bind (Direction dir):ApplyBase ns2:tail) = do
+  newRef <- getNewRef
+  processPipeline (Machine params pipelines:Bind (Direction dir):ApplyBase [Value (Ref newRef)]:Bind (Direction dir):ApplyBase ns2:tail)
+processPipeline (ApplyBase ns1:Bind (Direction dir):Machine params pipelines:tail) = do
+  newRef <- getNewRef
+  processPipeline (ApplyBase ns1:Bind (Direction dir):ApplyBase [Value (Ref newRef)]:Bind (Direction dir):Machine params pipelines:tail)
+processPipeline (Machine params1 pipelines1:Bind (Direction dir):Machine params2 pipelines2:tail) = do
+  newRef <- getNewRef
+  processPipeline (Machine params1 pipelines1:Bind (Direction dir):ApplyBase [Value (Ref newRef)]:Bind (Direction dir):Machine params2 pipelines2:tail)
 
 processMachineRun :: [Node] -> Maybe Node -> Maybe Node -> StateT Int (Either String) [SemanticStructure]
 processMachineRun ns ext1 ext2 = do
@@ -279,3 +298,18 @@ toApplyParam nextIndex (AdditionalParam (ApplyBase [Value value]) paramType posi
         Param direction paramType nextIndex value
 
 opeTest = o6Operators <|> o7Operators
+
+processMachineDef :: Node -> Maybe Node -> Maybe Node -> StateT Int (Either String) [SemanticStructure]
+processMachineDef (Machine params pipelines) ext1 ext2 = do
+  let machineParamDefs = concatMap processMachineParamDef params
+  sss <- forM pipelines $ \(Pipeline ns) -> processPipeline ns
+  let machine = MachineDef machineParamDefs $ concat sss
+  let machineRun = MachineRun (MRWithDef machine) []
+  let exts = catMaybes [ext1, ext2]
+  return [foldl appendParamToMachineRun machineRun exts]
+
+processMachineParamDef (MachineParam paramType params) =
+  map (\case {
+    Value (Symbol name) -> NoRef paramType name;
+    Value (Ref (GeneralRef name)) -> WithRef paramType (GeneralRef name)
+  }) params

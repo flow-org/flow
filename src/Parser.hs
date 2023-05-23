@@ -1,13 +1,15 @@
+{-# LANGUAGE RankNTypes #-}
 module Parser where
 
 import Node
 import BaseParser
 import Control.Monad.State
 import PipelineProcessor (processPipeline)
+import Debug.Trace (trace)
 -- import ApplyBaseParser (modifyApplyBase, modifyApplyBaseForStatements)
 
 -- texts which cannot be used for symbols
-reserved = ["<(", ")>", "=", "<->", "<-", "|", "->", "$"]
+reserved = ["<(", ")>", "=", "<->", "<-", "|", "->", "$", "{", "}"]
 
 commentTest = do
   char '#'
@@ -101,14 +103,14 @@ applyBaseTest = useMemo "applyBase" $ do
     oneOrMore blankTest
     valueTest <|> additionalParamTest
   return $ ApplyBase $ head:tail
-expTest = useMemo "exp" $ applyBaseTest <|> valueTest
 machineTest = useMemo "machine" $ do
   string "machine"
-  oneOrMore blankTest
   params <- manyOnes $ do
     oneOrMore blankTest
     machineParamTest
   (do many blankTest; char '\n') <|> oneOrMore blankTest
+  many blankTest
+  char '{'
   many blankTest
   head <- pipelineTest
   tail <- manyOnes $ do
@@ -116,15 +118,20 @@ machineTest = useMemo "machine" $ do
     char '\n'
     many blankTest
     pipelineTest
+  many blankTest
+  char '}'
   return $ Machine params (head:tail)
   -- todo
+machineParamTest :: StateT (ParseState Char u) (Either (Memos Char)) Node
 machineParamTest = useMemo "machineParam" $ do
   char '('
   paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
   params <- manyOnes $ do
     oneOrMore blankTest
     refTest <|> symbolTest
+  char ')'
   return $ MachineParam paramType params
+expTest = useMemo "exp" $ machineTest <|> applyBaseTest <|> valueTest
 
 pipelineTest = useMemo "pipeline" $ do
   head <- expTest
@@ -169,3 +176,15 @@ parse_ file = case parseFile (file ++ "\n$") of
 parse file = case parseFile (file ++ "\n$") of
   Right [Pipeline nodes] -> Right $ runStateT (processPipeline nodes) 0
   _ -> Left initMemos
+
+-- type Equal a b = forall p. (p a -> p b, p b -> p a)
+-- refl :: Equal a a
+-- refl = (id, id)
+-- symm :: Equal a b -> Equal b a
+-- symm (x, y) = (y, x)
+-- newtype Pack a = Pack { unpack :: a }
+-- apply :: Equal a b -> a -> b
+-- apply (s, t) = unpack . s . Pack
+-- newtype Lift f a b = Lift { unlift :: Equal (f a) (f b) }
+-- lift :: Equal a b -> Equal (f a) (f b)
+-- lift (s, t) = (unlift (s (Lift refl)), unlift (t, (Lift refl)))
