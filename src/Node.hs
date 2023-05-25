@@ -13,7 +13,7 @@ data Value =
   Ref Ref deriving (Show, Eq)
 data Node =
   Value Value |
-  AdditionalParam Node ParamType Position Bool |
+  AdditionalParam [Node] ParamType Position Bool |
   ApplyBase [Node] |
   Machine [Node] [Node] |
   Function [Node] Node |

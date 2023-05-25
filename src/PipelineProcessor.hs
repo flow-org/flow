@@ -14,10 +14,10 @@ getNewRef = do
   modify (+ 1)
   return $ DirectedRef $ "__" ++ show next
 
-toAdditionalParam L L2R ref = AdditionalParam (ApplyBase [Value $ Ref ref]) In L True
-toAdditionalParam L R2L ref = AdditionalParam (ApplyBase [Value $ Ref ref]) Out L True
-toAdditionalParam R L2R ref = AdditionalParam (ApplyBase [Value $ Ref ref]) Out R True
-toAdditionalParam R R2L ref = AdditionalParam (ApplyBase [Value $ Ref ref]) In R True
+toAdditionalParam L L2R ref = AdditionalParam [ApplyBase [Value $ Ref ref]] In L True
+toAdditionalParam L R2L ref = AdditionalParam [ApplyBase [Value $ Ref ref]] Out L True
+toAdditionalParam R L2R ref = AdditionalParam [ApplyBase [Value $ Ref ref]] Out R True
+toAdditionalParam R R2L ref = AdditionalParam [ApplyBase [Value $ Ref ref]] In R True
 
 processPipeline :: [Node] -> StateT Int (Either String) [SemanticStructure]
 processPipeline [single] = return []
@@ -65,9 +65,13 @@ processMachineRun ns ext1 ext2 = do
 
 -- O(n)
 appendParamToMachineRun :: SemanticStructure -> Node -> SemanticStructure
-appendParamToMachineRun (MachineRun mRef params) (AdditionalParam (ApplyBase [Value value]) paramType pos True) =
+appendParamToMachineRun (MachineRun mRef params) (AdditionalParam [ApplyBase [Value value]] paramType pos True) =
   let maxParam = maximum $ -1 : map (\(Param _ pType i _) -> if pType == paramType then i else -1) params in
-    MachineRun mRef $ toApplyParam (maxParam + 1) (AdditionalParam (ApplyBase [Value value]) paramType pos True) : params
+    MachineRun mRef $ toApplyParam (maxParam + 1) (AdditionalParam [ApplyBase [Value value]] paramType pos True) : params
+-- appendParamToMachineRun (MachineRun mRef params) (AdditionalParam nodes paramType pos True) =
+--   -- todo
+--   let maxParam = maximum $ -1 : map (\(Param _ pType i _) -> if pType == paramType then i else -1) params in
+--     MachineRun mRef $ toApplyParam (maxParam + 1) (AdditionalParam [ApplyBase [Value value]] paramType pos True) : params
 
 type ApplyBaseParseState = ParseState Node (Int, [SemanticStructure])
 processApplyBase :: [Node] -> StateT Int (Either String) [SemanticStructure]
@@ -128,7 +132,7 @@ nodesToSemanticStructureM (head:tail) = do
         setCurrentRef (ref + 1)
         state <- get
         let newRef = ApplyBase [Value $ Ref $ DirectedRef $ "__" ++ show ref]
-        case runStateT (resolveMachineRun $ nodes ++ b:[AdditionalParam newRef Out R True]) state of
+        case runStateT (resolveMachineRun $ nodes ++ b:[AdditionalParam [newRef] Out R True]) state of
           Left error -> trace error returnFail -- todo
           Right (headStructure, state) -> do
             put state
@@ -136,7 +140,7 @@ nodesToSemanticStructureM (head:tail) = do
               SSValue value -> return (Just headStructure, [Value value], 0, i + 1)
               MachineRun {} -> do
                 pushStructures [headStructure]
-                return (Nothing, [AdditionalParam newRef In L True], 0, i + 1)
+                return (Nothing, [AdditionalParam [newRef] In L True], 0, i + 1)
     ) (Nothing, [head], 0, 1) tail
   case folded of
     (Just structure, _, _, _) -> return structure
@@ -153,7 +157,7 @@ oTest nextTest operatorsTest = do
         ref <- getCurrentRef
         setCurrentRef (ref + 1)
         let newRef = Value $ Ref $ DirectedRef $ "__" ++ show ref
-        pushStructures [appendParamToMachineRun exp (AdditionalParam (ApplyBase [newRef]) Out R True)]
+        pushStructures [appendParamToMachineRun exp (AdditionalParam [ApplyBase [newRef]] Out R True)]
         return [symbol, newRef]
       _ -> returnFail
   if null tail then return head else do
@@ -163,7 +167,7 @@ oTest nextTest operatorsTest = do
         ref <- getCurrentRef
         setCurrentRef (ref + 1)
         let newRef = Value $ Ref $ DirectedRef $ "__" ++ show ref
-        pushStructures [appendParamToMachineRun head (AdditionalParam (ApplyBase [newRef]) Out R True)]
+        pushStructures [appendParamToMachineRun head (AdditionalParam [ApplyBase [newRef]] Out R True)]
         return newRef
       _ -> trace (show head) returnFail -- machine argument in operator is currently prohibited.
     nodesToSemanticStructureM (headNode:tail)
@@ -263,7 +267,7 @@ resolveMachineRun ns = do
     i <- getNextIndex In
     addParam $ Param R2L In i value
   handleAdditionalParam :: Node -> StateT MachineRunParseState (Either String) ()
-  handleAdditionalParam (AdditionalParam (ApplyBase [Value value]) paramType position torelance) = do
+  handleAdditionalParam (AdditionalParam [ApplyBase [Value value]] paramType position torelance) = do
     is <- isMachineAppeared
     case position of
       R -> do
@@ -271,7 +275,7 @@ resolveMachineRun ns = do
       L -> do
         when (is && not torelance) $ lift $ Left $ "AdditionalParam appeared after machine: " ++ show value
     i <- getNextIndex paramType
-    addParam $ toApplyParam i (AdditionalParam (ApplyBase [Value value]) paramType position torelance)
+    addParam $ toApplyParam i (AdditionalParam [ApplyBase [Value value]] paramType position torelance)
   handleMachine :: MachineRef -> StateT MachineRunParseState (Either String) ()
   handleMachine machine = do
     oldMachine <- getMachine
@@ -288,7 +292,7 @@ resolveMachineRun ns = do
         putNextRef ref
     handleValue newRef
 
-toApplyParam nextIndex (AdditionalParam (ApplyBase [Value value]) paramType position torelance) =
+toApplyParam nextIndex (AdditionalParam [ApplyBase [Value value]] paramType position torelance) =
   case position of
     R -> do
       let direction = (case paramType of In -> R2L; Out -> L2R) in

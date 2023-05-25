@@ -68,19 +68,21 @@ additionalParamTest = useMemo "additionalParam" $ (do
   many blankTest
   paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
   oneOrMore blankTest
-  exp <- expTest -- todo: pipeline
+  pipeline <- pipelineTest
+  let (Pipeline nodes) = pipeline
   many blankTest
   char ')'
-  return $ AdditionalParam exp paramType R False) <|> (do
+  return $ AdditionalParam nodes paramType R False) <|> (do
     char '('
     many blankTest
-    exp <- expTest -- todo: pipeline
+    pipeline <- pipelineTest
+    let (Pipeline nodes) = pipeline
     oneOrMore blankTest
     -- <- and -> are not exp.
     paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
     many blankTest
     char ')'
-    return $ AdditionalParam exp paramType L False)
+    return $ AdditionalParam nodes paramType L False)
 parensTest = useMemo "parens" $ do
   char '('
   many blankTest
