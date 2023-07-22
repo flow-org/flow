@@ -54,6 +54,11 @@ processPipeline (Machine params1 pipelines1:Bind (Direction dir):Machine params2
   newRef <- getNewRef
   processPipeline (Machine params1 pipelines1:Bind (Direction dir):ApplyBase [Value (Ref newRef)]:Bind (Direction dir):Machine params2 pipelines2:tail)
 
+type SPEnv t = StateT [SemanticStructure] (StateT Int (Either String)) t
+addByproduct :: SemanticStructure -> SPEnv ()
+addByproduct byproduct = modify (byproduct:)
+
+
 processMachineRun :: [Node] -> Maybe Node -> Maybe Node -> StateT Int (Either String) [SemanticStructure]
 processMachineRun ns ext1 ext2 = do
   nextRef <- get

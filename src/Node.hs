@@ -1,4 +1,6 @@
 module Node where
+import Control.Monad (liftM)
+import Control.Monad.Cont (ap)
 
 data BindType = Direction Direction | Bi deriving (Show, Eq)
 data Direction = R2L | L2R deriving (Show, Eq)
@@ -45,3 +47,25 @@ data SemanticStructure =
   MachineRun MachineRef [ApplyParam] deriving (Show, Eq)
 
 data ApplyParam = Param Direction ParamType Int Value deriving (Show, Eq)
+
+newtype ContT r m a = ContT { runContT :: (a -> m r) -> m r }
+
+instance Functor (ContT r m) where
+    fmap = liftM
+
+instance Applicative (ContT r m) where
+    pure = return
+    (<*>) = ap
+
+instance Monad (ContT r m) where
+    return a = ContT $ \f -> f a
+    ContT a >>= f = ContT $ \g -> a $ \a' -> runContT (f a') g
+
+callCC :: ((a -> ContT r m b) -> ContT r m a) -> ContT r m a
+callCC f = ContT $ \g ->
+    runContT (f $ ContT . const . g) g
+
+getCC :: ContT r m (ContT r m a)
+getCC = callCC $ \exit ->
+    let a = exit a
+     in return a
