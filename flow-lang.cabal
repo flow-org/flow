@@ -37,7 +37,8 @@ library
         mtl,
         containers,
         text,
-        parsec
+        parsec,
+        fgl
     hs-source-dirs:   src
     default-language: Haskell2010
 
