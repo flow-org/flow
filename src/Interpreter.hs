@@ -9,6 +9,7 @@ import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, readSTRef)
 import Data.Maybe (isJust)
 import Data.List (find)
+import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
 
 data Value = VInt Int deriving Show
 
@@ -36,15 +37,13 @@ nodes m = inner $ Map.toList m where
 toGraph :: Map.Map Int INode -> Gr Intermediate Int
 toGraph m = mkGraph (nodes m) (edges m)
 
-runGraph :: Graph gr => gr Intermediate Int -> IContext -> EvContext -> IO ()
-runGraph graph ic evc = do
-  nextEvc <- factoryNextEvc graph evc
-  nextEvcGenerated <- factoryNextGenerated graph evc (genNodes ic)
-  -- print nextEvcGenerated
-  -- return ()
-  runGraph graph ic $ nextEvc ++ nextEvcGenerated
+runGraph :: Graph gr => gr Intermediate Int -> IContext -> EvContext -> IO (Maybe ())
+runGraph graph ic evc = runMaybeT $ do
+  nextEvc <- MaybeT $ factoryNextEvc graph evc
+  nextEvcGenerated <- MaybeT $ factoryNextGenerated graph evc (genNodes ic)
+  MaybeT $ runGraph graph ic $ nextEvc ++ nextEvcGenerated
 
-factoryNextEvc graph evc = loop evc [] where
+factoryNextEvc graph evc = runMaybeT $ loop evc [] where
     loop [] _ = return []
     loop ((nid, eidx, v) : rest) muteList = do
       if nid `elem` muteList
@@ -55,12 +54,13 @@ factoryNextEvc graph evc = loop evc [] where
           if length restParticles == length inns - 1
             then do
               let (Just intermediate) = lab graph nid
-              values <- factoryValue intermediate ((nid, eidx, v) : restParticles)
+              values <- MaybeT $ factoryValue intermediate ((nid, eidx, v) : restParticles)
               let [(_, nextNid, nextEidx)] = out graph nid
               (map (\(_,value) -> (nextNid, nextEidx, value)) values ++) <$> loop rest (nid : muteList)
             else loop rest muteList
 
-factoryNextGenerated graph evc genNodes = loop genNodes where
+factoryNextGenerated graph evc genNodes = runMaybeT $ loop genNodes where
+  loop :: [Int] -> MaybeT IO EvContext
   loop [] = return []
   loop (nid : rest) = do
     let outs = out graph nid
@@ -68,19 +68,22 @@ factoryNextGenerated graph evc genNodes = loop genNodes where
     if occupied then loop rest
     else do
       let (Just intermediate) = lab graph nid
-      values <- factoryValue intermediate []
+      values <- MaybeT $ factoryValue intermediate []
       let [(_, nextNid, nextEidx)] = outs
-      (map (\(_,value) -> (nextNid, nextEidx, value)) values ++) <$> loop rest
+      (map (\(_, value) -> (nextNid, nextEidx, value)) values ++) <$> loop rest
 
-factoryValue :: Intermediate -> EvContext -> IO [(Int, Value)]
-factoryValue (IVar "+") particles =
-  return [(0, VInt (sum $ map (\(_, _, VInt x) -> x) particles))]
+factoryValue :: Intermediate -> EvContext -> IO (Maybe [(Int, Value)])
+factoryValue (IVar "+") particles = do
+  return $ Just [(0, VInt (sum $ map (\(_, _, VInt x) -> x) particles))]
 factoryValue (IVar "output") [(_,_,v)] = do
-  print $ show v
-  getChar
-  return []
+  putStr $ show v
+  c <- getChar
+  putStrLn ""
+  if c == ';'
+    then return $ Just []
+    else return Nothing
 factoryValue (INum i) [] =
-  return [(0, VInt i)]
+  return $ Just [(0, VInt i)]
 
 eval :: Command -> StateT (Maybe EvState) IO ()
 eval (CExp exp) = do

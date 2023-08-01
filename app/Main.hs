@@ -15,7 +15,10 @@ main = do
       Right (m, ic) -> do
         print (m, ic)
         let graph = toGraph m
-        runGraph graph ic [])
+        result <- runGraph graph ic []
+        case result of
+          Just _ -> return ()
+          Nothing -> putStrLn "terminated")
 
 -- test file = do
 --   result <- run file
