@@ -19,10 +19,14 @@ var :: Parsec String u Exp
 -- var = EVar <$> ((++) <$> (return <$> letter) <*> many (letter <|> digit))
 var = EVar <$> many1 allowedLetter
 
+genMode :: Parsec String u GenMode
+genMode = (char '!' >> return GMOnce) <|> return GMAlways
+
 number :: Parsec String u Exp
 number = do
   x <- many1 digit
-  return $ ENum $ read x
+  gm <- genMode
+  return $ ENum (read x) gm
 
 ref :: Parsec String u Exp
 ref = do
@@ -30,7 +34,13 @@ ref = do
   x <- many1 (letter <|> digit)
   return $ ERef x
 
-primitive = parens <|> ref <|> number <|> var
+address :: Parsec String u Exp
+address = do
+  char '#'
+  x <- many1 (letter <|> digit)
+  return $ EAddress x
+
+primitive = parens <|> ref <|> address <|> number <|> var
 
 arrow :: Parsec String u Arrow
 arrow = (do

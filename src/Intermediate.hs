@@ -9,12 +9,19 @@ import Control.Monad (forM)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, modifySTRef, readSTRef, writeSTRef)
 -- data IGraph a = INode { label :: a, value :: Intermediate, adjacent :: [IGraph a] } deriving Show
-data Intermediate = IVar String | INum Int | IRef String | IAddress String deriving Show
+data Intermediate = IVar String | INum Int GenMode | IRef String | IAddress String deriving Show
 type NodeId = Int
 type EdgeIndex = Int
 data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
+data IRefState = IRefState { refNodeId :: NodeId, produced :: Bool, consumed :: Bool } deriving Show
 data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
-data IState = IState { currentNodes :: Map.Map NodeId INode, available :: [NodeId], next :: NodeId, context :: IContext } deriving Show
+data IState = IState {
+  currentNodes :: Map.Map NodeId INode,
+  available :: [NodeId],
+  refs :: Map.Map String IRefState,
+  next :: NodeId,
+  context :: IContext
+} deriving Show
 
 requiredInputs :: String -> Maybe Int
 requiredInputs "+" = Just 2
@@ -23,6 +30,8 @@ requiredInputs "*" = Just 2
 requiredInputs "/" = Just 2
 requiredInputs "input" = Just 0
 requiredInputs "output" = Just 1
+requiredInputs "trace" = Just 1
+requiredInputs "merge" = Just 2 -- todo
 requiredInputs _ = Nothing
 
 requiredOutputs :: String -> Maybe Int
@@ -32,8 +41,19 @@ requiredOutputs "*" = Just 1
 requiredOutputs "/" = Just 1
 requiredOutputs "input" = Just 1
 requiredOutputs "output" = Just 0
+requiredOutputs "trace" = Just 1
+requiredOutputs "merge" = Just 1
 requiredOutputs _ = Nothing
 
+appendEdge :: NodeId -> EdgeIndex -> NodeId -> Map.Map NodeId INode -> Map.Map NodeId INode
+appendEdge nid eidx nidTo = Map.alter inner nid where
+  inner = \case Just (INode value adj) -> Just $ INode value ((eidx, nidTo) : adj)
+                Nothing -> Nothing
+modifyCurrentNodes :: Monad m => (Map.Map NodeId INode -> Map.Map NodeId INode) -> StateT IState m ()
+modifyCurrentNodes f = do
+  is <- get
+  let nodes = currentNodes is
+  put $ is { currentNodes = f nodes }
 consume :: Int -> StateT IState (Either String) ()
 consume requires = do
   is <- get
@@ -44,9 +64,10 @@ consume requires = do
     let newNodes = runST $ do
           nodes <- newSTRef $ currentNodes is
           forM_ (zip uses (iterate (+1) 0)) (\(id, index) -> do
-            nextNodes <- Map.alter
-              (\case Just (INode value adj) -> Just $ INode value ((index, next is) : adj)
-                     Nothing -> Nothing) id <$> readSTRef nodes
+            nextNodes <- appendEdge id index (next is) <$> readSTRef nodes
+            -- nextNodes <- Map.alter
+            --   (\case Just (INode value adj) -> Just $ INode value ((index, next is) : adj)
+            --          Nothing -> Nothing) id <$> readSTRef nodes
             writeSTRef nodes nextNodes)
           readSTRef nodes
     put $ is { currentNodes = newNodes, available = rest }
@@ -78,18 +99,45 @@ convertIntermediate (EConnect arrow l r) = (case arrow of
     inner from to = do
       convertIntermediate from
       convertIntermediate to
-convertIntermediate (ENum i) = do
-  appendNode (INum i)
+convertIntermediate (ENum i gm) = do
+  appendNode (INum i gm)
   produce 1
   id <- currentCounter
   modifyContext $ \ic -> ic { genNodes = id : genNodes ic }
   nextCounter
 convertIntermediate (ERef ref) = do -- todo
   is <- get
-  appendNode (IRef ref)
-  consume $ length $ available is
-  produce 1
-  nextCounter
+  let refList = refs is
+  let isConsumer = length (available is) > 0 -- this check may be inappropriate
+  case Map.lookup ref refList of
+    Just (IRefState refnid produced consumed) ->
+      if isConsumer
+        then
+          if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
+          else do
+            let (use : rest) = available is
+            modify $ \is -> is { available = rest, refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
+            modifyCurrentNodes $ appendEdge use 0 refnid
+        else
+          if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
+          else do
+            modify $ \is -> is { available = refnid : available is, refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
+    Nothing -> do
+      appendNode (IRef ref)
+      if isConsumer
+        then do
+          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) False True) refList }
+          consume 1
+          nextCounter
+        else do
+          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
+          produce 1
+          nextCounter
+
+--   appendNode (IRef ref)
+--   consume $ length $ available is
+--   produce 1
+--   nextCounter
 convertIntermediate (EAddress address) = do -- todo
   is <- get
   appendNode (IAddress address)
@@ -99,7 +147,7 @@ convertIntermediate (EAddress address) = do -- todo
   nextCounter
 
 convert :: Exp -> Either String (Map.Map Int INode, IContext)
-convert exp = case execStateT (convertIntermediate exp) $ IState Map.empty [] 0 (IContext Map.empty []) of
+convert exp = case execStateT (convertIntermediate exp) $ IState Map.empty [] Map.empty 0 (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
