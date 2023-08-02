@@ -1,10 +1,13 @@
+{-# LANGUAGE LambdaCase #-}
 module Intermediate where
-import Control.Monad.State (StateT, MonadTrans (lift), execState, execStateT)
+import Control.Monad.State (StateT, MonadTrans (lift), execState, execStateT, forM_)
 import Syntax
 import Control.Monad.State.Class (modify, get, put)
 import qualified Data.Map.Strict as Map
 import Debug.Trace (trace)
 import Control.Monad (forM)
+import Control.Monad.ST (runST)
+import Data.STRef (newSTRef, modifySTRef, readSTRef, writeSTRef)
 -- data IGraph a = INode { label :: a, value :: Intermediate, adjacent :: [IGraph a] } deriving Show
 data Intermediate = IVar String | INum Int | IRef String | IAddress String deriving Show
 type NodeId = Int
@@ -33,28 +36,32 @@ requiredOutputs _ = Nothing
 
 consume :: Int -> StateT IState (Either String) ()
 consume requires = do
-  (IState currentNodes available next c) <- get
-  if requires > length available then lift $ Left ("AST Node " ++ show (Map.lookup next currentNodes) ++ " cannot receive sufficient inputs.")
-  else let (uses, rest) = splitAt requires available in
-    let newNodes = foldl (\nodes (id, index) -> Map.alter (\x -> case x of Just (INode value adj) -> Just $ (INode value ((index, next) : adj))
-                                                                           Nothing -> Nothing) id nodes) currentNodes $ zip uses (iterate (+1) 0) in
-      put $ IState newNodes rest next c
+  is <- get
+  if requires > length (available is)
+  then lift $ Left ("AST Node " ++ show (Map.lookup (next is) $ currentNodes is) ++ " cannot receive sufficient inputs.")
+  else do
+    let (uses, rest) = splitAt requires (available is)
+    let newNodes = runST $ do
+          nodes <- newSTRef $ currentNodes is
+          forM_ (zip uses (iterate (+1) 0)) (\(id, index) -> do
+            nextNodes <- Map.alter
+              (\case Just (INode value adj) -> Just $ INode value ((index, next is) : adj)
+                     Nothing -> Nothing) id <$> readSTRef nodes
+            writeSTRef nodes nextNodes)
+          readSTRef nodes
+    put $ is { currentNodes = newNodes, available = rest }
 produce :: Monad m => Int -> StateT IState m ()
 produce requires =
-  modify $ \(IState currentNodes available next c) ->
-    IState currentNodes (replicate requires next ++ available) next c
+  modify $ \is -> is { available = replicate requires (next is) ++ available is }
 appendNode :: Monad m => Intermediate -> StateT IState m ()
 appendNode node =
-  modify $ \(IState currentNodes available next c) ->
-    IState (Map.insert next (INode node []) currentNodes) available next c
+  modify $ \is -> is { currentNodes = Map.insert (next is) (INode node []) (currentNodes is) }
 nextCounter :: Monad m => StateT IState m ()
-nextCounter = modify $ \(IState currentNodes available next c) -> IState currentNodes available (next + 1) c
+nextCounter = modify $ \is -> is { next = next is + 1 }
 currentCounter :: Monad m => StateT IState m Int
-currentCounter = do
-  (IState _ _ counter _) <- get
-  return counter
+currentCounter = next <$> get
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
-modifyContext f = modify $ \(IState nodes available next c) -> IState nodes available next $ f c
+modifyContext f = modify $ \is -> is { context = f $ context is }
 
 convertIntermediate :: Exp -> StateT IState (Either String) ()
 convertIntermediate (EVar varName) = do
@@ -75,26 +82,26 @@ convertIntermediate (ENum i) = do
   appendNode (INum i)
   produce 1
   id <- currentCounter
-  modifyContext $ \(IContext addresses genNodes) -> IContext addresses (id : genNodes)
+  modifyContext $ \ic -> ic { genNodes = id : genNodes ic }
   nextCounter
 convertIntermediate (ERef ref) = do -- todo
-  (IState currentNodes available next c) <- get
+  is <- get
   appendNode (IRef ref)
-  consume $ length available
+  consume $ length $ available is
   produce 1
   nextCounter
 convertIntermediate (EAddress address) = do -- todo
-  (IState currentNodes available next c) <- get
+  is <- get
   appendNode (IAddress address)
   consume 1
   produce 1
-  modifyContext $ \(IContext addresses genNodes) -> IContext (Map.insert address next addresses) genNodes
+  modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
   nextCounter
 
 convert :: Exp -> Either String (Map.Map Int INode, IContext)
 convert exp = case execStateT (convertIntermediate exp) $ IState Map.empty [] 0 (IContext Map.empty []) of
   Left err -> Left err
-  Right x -> let (IState nodes _ _ c) = x in Right (nodes, c)
+  Right is -> Right (currentNodes is, context is)
 
 -- contrLinks :: [(a, a)] -> [(a, [a])]
 -- contrLinks 

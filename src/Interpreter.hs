@@ -15,9 +15,9 @@ data Value = VInt Int deriving Show
 
 type NodeId = Int
 type EdgeIndex = Int
-type Particle = (NodeId, EdgeIndex, Value)
-type EvContext = [Particle]
-type EvState = (Gr Intermediate EdgeIndex, IContext, EvContext)
+data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
+type EvContext = [EvParticle]
+data EvState = EvState { graph :: Gr Intermediate EdgeIndex, ic :: IContext, evc :: EvContext }
 
 emptyEvContext :: EvContext
 emptyEvContext = []
@@ -45,18 +45,18 @@ runGraph graph ic evc = runMaybeT $ do
 
 factoryNextEvc graph evc = runMaybeT $ loop evc [] where
     loop [] _ = return []
-    loop ((nid, eidx, v) : rest) muteList = do
+    loop (EvParticle nid eidx v : rest) muteList = do
       if nid `elem` muteList
         then loop rest muteList
         else do
           let inns = map (\(_, _, label) -> label) $ inn graph nid
-          let restParticles = filter (\(nid_, eidx_, _) -> nid_ == nid && eidx `elem` inns) rest
+          let restParticles = filter (\(EvParticle nid_ eidx_ _) -> nid_ == nid && eidx `elem` inns) rest
           if length restParticles == length inns - 1
             then do
               let (Just intermediate) = lab graph nid
-              values <- MaybeT $ factoryValue intermediate ((nid, eidx, v) : restParticles)
+              values <- MaybeT $ factoryValue intermediate (EvParticle nid eidx v : restParticles)
               let [(_, nextNid, nextEidx)] = out graph nid
-              (map (\(_,value) -> (nextNid, nextEidx, value)) values ++) <$> loop rest (nid : muteList)
+              (map (\(_,value) -> EvParticle nextNid nextEidx value) values ++) <$> loop rest (nid : muteList)
             else loop rest muteList
 
 factoryNextGenerated graph evc genNodes = runMaybeT $ loop genNodes where
@@ -64,18 +64,19 @@ factoryNextGenerated graph evc genNodes = runMaybeT $ loop genNodes where
   loop [] = return []
   loop (nid : rest) = do
     let outs = out graph nid
-    let occupied = isJust $ find (\(nextNid, eidx, _) -> (nid, nextNid, eidx) `elem` outs) evc
+    let occupied = isJust $ find (\(EvParticle nextNid eidx _) -> (nid, nextNid, eidx) `elem` outs) evc
     if occupied then loop rest
     else do
       let (Just intermediate) = lab graph nid
       values <- MaybeT $ factoryValue intermediate []
       let [(_, nextNid, nextEidx)] = outs
-      (map (\(_, value) -> (nextNid, nextEidx, value)) values ++) <$> loop rest
+      (map (\(_, value) -> EvParticle nextNid nextEidx value) values ++) <$> loop rest
 
 factoryValue :: Intermediate -> EvContext -> IO (Maybe [(Int, Value)])
 factoryValue (IVar "+") particles = do
-  return $ Just [(0, VInt (sum $ map (\(_, _, VInt x) -> x) particles))]
-factoryValue (IVar "output") [(_,_,v)] = do
+  return $ Just [(0, VInt (sum $ map (\p -> let (VInt x) = particleValue p in x) particles))]
+factoryValue (IVar "output") [p] = do
+  let v = particleValue p
   putStr $ show v
   c <- getChar
   putStrLn ""
@@ -89,7 +90,7 @@ eval :: Command -> StateT (Maybe EvState) IO ()
 eval (CExp exp) = do
   case convert exp of
     Left err -> lift $ putStrLn err
-    Right (m, c) -> put $ Just (toGraph m, c, emptyEvContext)
+    Right (m, c) -> put $ Just $ EvState (toGraph m) c emptyEvContext
 -- eval (CSpawn address exp) = do
 --   state <- get
 --   case state of
