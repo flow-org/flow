@@ -22,7 +22,9 @@ main = do
           Nothing -> putStrLn "terminated")
 
 test = do
-  case parse "@a -> (1! -> merge) -> (1 -> +) -> trace -> @a" of
+  case parse "0! -> if then:-> 2 else:-> 3 -> merge -> output" of
+  -- case parse "@a -> (0! -> merge) -> (1* -> +) -> trace -> @a" of
+  -- case parse "1* -> 2* -> + -> output" of
     Left a -> print "parse fail"
     Right a -> print a >> (case convert a of
       Left a -> print a

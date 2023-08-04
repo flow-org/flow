@@ -20,7 +20,7 @@ var :: Parsec String u Exp
 var = EVar <$> many1 allowedLetter
 
 genMode :: Parsec String u GenMode
-genMode = (char '!' >> return GMOnce) <|> return GMAlways
+genMode = (char '!' >> return GMOnce) <|> (char '*' >> return GMAlways) <|> return GMPassive
 
 number :: Parsec String u Exp
 number = do
@@ -42,14 +42,30 @@ address = do
 
 primitive = parens <|> ref <|> address <|> number <|> var
 
+arrowLabelLeft :: Parsec String u (Maybe String)
+arrowLabelLeft = (do
+  x <- many1 (letter <|> digit)
+  char ':'
+  return $ Just x) <|> return Nothing
+
+arrowLabelRight :: Parsec String u (Maybe String)
+arrowLabelRight = (do
+  char ':'
+  x <- many1 (letter <|> digit)
+  return $ Just x) <|> return Nothing
+
 arrow :: Parsec String u Arrow
-arrow = (do
+arrow = do
+  label1 <- arrowLabelLeft
+  (do
     char '<'
     char '-'
-    return $ AToLeft Normal) <|> (do
+    label2 <- arrowLabelRight
+    return $ AToLeft Normal label2 label1) <|> (do
     char '-'
     char '>'
-    return $ AToRight Normal)
+    label2 <- arrowLabelRight
+    return $ AToRight Normal label1 label2)
 
 eexp = do
   head <- primitive
