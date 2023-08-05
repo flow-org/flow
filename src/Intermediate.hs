@@ -16,7 +16,12 @@ data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
 data IRefState = IRefState { refNodeId :: NodeId, produced :: Bool, consumed :: Bool } deriving Show
 data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
 data IAvailable = IAvailable { aNodeId :: NodeId, outName :: String, seekingInName :: Maybe String } deriving Show
+
+-- new
+data IInNode = IInNode { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
+
 data IState = IState {
+  -- maybe old
   currentNodes :: Map.Map NodeId INode,
   available :: [IAvailable],
   refs :: Map.Map String IRefState,
@@ -113,79 +118,211 @@ currentCounter = next <$> get
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
 modifyContext f = modify $ \is -> is { context = f $ context is }
 
-convertIntermediate :: Exp -> StateT IState (Either String) ()
-convertIntermediate (EVar varName) = do
-  appendNode (IVar varName)
+-- convertIntermediate :: Exp -> StateT IState (Either String) ()
+-- convertIntermediate (EVar varName) = do
+--   appendNode (IVar varName)
+--   let (inNames, outNames) = (requiredInputs varName, requiredOutputs varName)
+--   consume inNames
+--   produce outNames
+--   nextCounter
+--     -- _ -> lift $ Left (varName ++ " is not defined")
+-- convertIntermediate (EConnect arrow l r) = (case arrow of
+--   AToLeft _ inLabel outLabel -> inner r l inLabel outLabel
+--   AToRight _ inLabel outLabel -> inner l r inLabel outLabel) where
+--     inner from to inLabel outLabel = do
+--       convertIntermediate from
+--       (case inLabel of
+--         Just inLabelStr -> modify $ \is -> is { consumeLabelStack = inLabelStr : consumeLabelStack is }
+--         Nothing -> return ())
+--       -- (case outLabel of
+--       --   Just outLabelStr -> ) -- todo: it is needed to memorize the last created edge
+--       convertIntermediate to
+-- convertIntermediate (ENum i GMPassive) = do
+--   appendNode (INum i GMPassive)
+--   consume ["a"]
+--   produce ["result"]
+--   nextCounter
+-- convertIntermediate (ENum i gm) = do
+--   appendNode (INum i gm)
+--   produce ["result"]
+--   id <- currentCounter
+--   modifyContext $ \ic -> ic { genNodes = id : genNodes ic }
+--   nextCounter
+-- convertIntermediate (ERef ref) = do -- todo
+--   is <- get
+--   let refList = refs is
+--   let isConsumer = length (available is) > 0 -- this check may be inappropriate
+--   case Map.lookup ref refList of
+--     Just (IRefState refnid produced consumed) ->
+--       if isConsumer
+--         then
+--           if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
+--           else do
+--             (IAvailable nid outName _) <- pickAvailableItemToConsume "refIn"
+--             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
+--             modifyCurrentNodes $ appendEdge nid (outName, "refIn") refnid
+--         else
+--           if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
+--           else do
+--             modify $ \is -> is { available = IAvailable refnid "refOut" Nothing : available is, refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
+--     Nothing -> do
+--       appendNode (IRef ref)
+--       if isConsumer
+--         then do
+--           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) False True) refList }
+--           consume ["refIn"]
+--           nextCounter
+--         else do
+--           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
+--           produce ["refOut"]
+--           nextCounter
+
+--   appendNode (IRef ref)
+--   consume $ length $ available is
+--   produce 1
+--   nextCounter
+-- convertIntermediate (EAddress address) = do -- todo
+--   currentInNodes <- inNodes <$> get
+--   appendNode (IAddress address)
+--   consume ["addressIn"]
+--   produce ["addressOut"]
+--   modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
+--   nextCounter
+
+matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
+matchOutsWithExpectedOuts a b = fst $ inner a b where
+  inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
+  inner [] inNodes = (([], inNodes), [])
+  inner outs [] = (([], []), outs)
+  inner outs (inNode:ys) =
+    let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
+    case b of
+      hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
+      [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
+
+matchInsWithInNodes :: [String] -> [IInNode] -> [(NodeId, EdgeIndex)]
+matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
+  inner :: [String] -> [IInNode] -> ([(NodeId, EdgeIndex)], [IInNode])
+  inner [] rest = ([], rest)
+  inner (inn:xs) inNodes =
+    let (a, b) = span (\inNode -> Just inn /= expectedToConnectWith inNode) inNodes in
+    case b of
+      hit:rest -> let (c, d) = inner xs (a ++ rest) in ((fromNid hit, (fromName hit, inn)) : c, d)
+      [] -> let (c, head:tail) = inner xs inNodes in ((fromNid head, (fromName head, inn)) : c, tail)
+
+  -- let (withNames, withoutNames) = partition (\inNode -> isJust $ expectedToConnectWith inNode) inNodes in
+  -- inner outs withNames withoutNames where
+  --   inner [] rest1 rest2 = ([], rest1 ++ rest2)
+  --   inner outs [] withoutNames =
+  --     let dropped = drop (length outs) withoutNames in
+  --     (zip withoutNames outs, dropped)
+  --   inner ((e@EOut _ (Just name)):xs) withNames withoutNames =
+  --     let targetNode = find (\inNode -> expectedToConnectWith )
+
+handleMiddle :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
+handleMiddle (EMiddle ins e outs) externalIns = do
+  inNodes <- forM ins handleIn
+  (expectedOuts, _) <- handleMiddleOrPrimitive e (inNodes ++ externalIns)
+  let (matched, rest) = matchOutsWithExpectedOuts outs expectedOuts
+  ar <- forM matched (\(inNode, e) -> handleOut e inNode)
+  if null ar
+    then return (rest, rest)
+    else return (rest, last ar)
+
+handleIn :: Exp -> StateT IState (Either String) IInNode
+handleIn (EIn e _ to) = do -- from ignore : todo
+  (_, inNodes) <- handleMiddle e []
+  let lastNodeInNode = head inNodes
+  return $ lastNodeInNode { expectedToConnectWith = to }
+
+handleOut :: Exp -> IInNode -> StateT IState (Either String) [IInNode]
+handleOut (EOut e _ to) inNode = do
+  let inNodeToUse = inNode { expectedToConnectWith = to }
+  (_, lastNodeInNodes) <- handleMiddle e [inNodeToUse]
+  return lastNodeInNodes
+
+handleMiddleOrPrimitive :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
+handleMiddleOrPrimitive e@(EMiddle {}) externalIns = handleMiddle e externalIns
+handleMiddleOrPrimitive (EVar varName) externalIns = do
   let (inNames, outNames) = (requiredInputs varName, requiredOutputs varName)
-  consume inNames
-  produce outNames
+  let edges = matchInsWithInNodes inNames externalIns
+  counter <- next <$> get
+  forM_ edges (\(nid, edgeIndex) -> do
+    is <- get
+    let newNodes = appendEdge nid edgeIndex counter (currentNodes is)
+    modify (\is -> is { currentNodes = newNodes }))
+  appendNode (IVar varName)
   nextCounter
-    -- _ -> lift $ Left (varName ++ " is not defined")
-convertIntermediate (EConnect arrow l r) = (case arrow of
-  AToLeft _ inLabel outLabel -> inner r l inLabel outLabel
-  AToRight _ inLabel outLabel -> inner l r inLabel outLabel) where
-    inner from to inLabel outLabel = do
-      convertIntermediate from
-      (case inLabel of
-        Just inLabelStr -> modify $ \is -> is { consumeLabelStack = inLabelStr : consumeLabelStack is }
-        Nothing -> return ())
-      -- (case outLabel of
-      --   Just outLabelStr -> ) -- todo: it is needed to memorize the last created edge
-      convertIntermediate to
-convertIntermediate (ENum i GMPassive) = do
+  let newInNodes = map (\outName -> IInNode counter outName Nothing) outNames
+  return (newInNodes, newInNodes)
+handleMiddleOrPrimitive (ENum i GMPassive) externalIns = do
+  let edges = matchInsWithInNodes ["a"] externalIns
+  counter <- next <$> get
+  forM_ edges (\(nid, edgeIndex) -> do
+    is <- get
+    let newNodes = appendEdge nid edgeIndex counter (currentNodes is)
+    modify (\is -> is { currentNodes = newNodes }))
   appendNode (INum i GMPassive)
-  consume ["a"]
-  produce ["result"]
   nextCounter
-convertIntermediate (ENum i gm) = do
+  let newInNodes = [IInNode counter "result" Nothing]
+  return (newInNodes, newInNodes)
+handleMiddleOrPrimitive (ENum i gm) externalIns = do
+  counter <- next <$> get
+  modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
   appendNode (INum i gm)
-  produce ["result"]
-  id <- currentCounter
-  modifyContext $ \ic -> ic { genNodes = id : genNodes ic }
   nextCounter
-convertIntermediate (ERef ref) = do -- todo
+  let newInNodes = [IInNode counter "result" Nothing]
+  return (newInNodes, newInNodes)
+handleMiddleOrPrimitive (ERef ref) externalIns = do
   is <- get
   let refList = refs is
-  let isConsumer = length (available is) > 0 -- this check may be inappropriate
+  let isConsumer = length externalIns > 0 -- this check may be inappropriate
   case Map.lookup ref refList of
     Just (IRefState refnid produced consumed) ->
       if isConsumer
         then
           if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
           else do
-            (IAvailable nid outName _) <- pickAvailableItemToConsume "refIn"
+            let edges = matchInsWithInNodes ["refIn"] externalIns
+            forM_ edges (\(nid, edgeIndex) -> do
+              is <- get
+              let newNodes = appendEdge nid edgeIndex refnid (currentNodes is)
+              modify (\is -> is { currentNodes = newNodes }))
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
-            modifyCurrentNodes $ appendEdge nid (outName, "refIn") refnid
+            return ([], [])
         else
+          -- todo: disable produced check
           if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
           else do
-            modify $ \is -> is { available = IAvailable refnid "refOut" Nothing : available is, refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
+            modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
+            let newInNodes = [IInNode refnid "refOut" Nothing]
+            return (newInNodes, newInNodes)
     Nothing -> do
       appendNode (IRef ref)
       if isConsumer
         then do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) False True) refList }
-          consume ["refIn"]
+          let edges = matchInsWithInNodes ["refIn"] externalIns
+          forM_ edges (\(nid, edgeIndex) -> do
+            is <- get
+            let newNodes = appendEdge nid edgeIndex (next is) (currentNodes is)
+            modify (\is -> is { currentNodes = newNodes }))
           nextCounter
+          return ([], [])
         else do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
-          produce ["refOut"]
+          counter <- next <$> get
+          let newInNodes = [IInNode counter "refOut" Nothing]
           nextCounter
+          return (newInNodes, newInNodes)
 
---   appendNode (IRef ref)
---   consume $ length $ available is
---   produce 1
---   nextCounter
-convertIntermediate (EAddress address) = do -- todo
-  is <- get
-  appendNode (IAddress address)
-  consume ["addressIn"]
-  produce ["addressOut"]
-  modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
-  nextCounter
+-- do
+--   inNodes <- forM ins handleIn
+--   expectedOuts <- handleMiddleOrPrimitive e (inNodes ++ externalIns)
+--   forM outs handleOut
 
 convert :: Exp -> Either String (Map.Map Int INode, IContext)
-convert exp = case execStateT (convertIntermediate exp) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+convert exp = case execStateT (handleMiddle exp []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
