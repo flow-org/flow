@@ -15,59 +15,60 @@ addMemo memos i label result = Map.insert (i, label) result memos
 initMemos :: Memos t n
 initMemos = Map.empty
 
-type ParseState t u n = (Int, Memos t n, [t], u)
+data ParseState t u n = ParseState { psPos :: Int, psMemos :: Memos t n, psRest :: [t], psExtra :: u }
 useMemo :: (Ord t) => [t]
   -> StateT (ParseState t u n) (Either (Memos t n)) n
   -> StateT (ParseState t u n) (Either (Memos t n)) n
-useMemo label p = StateT $ \(i, memos, xs, extra) -> case findMemo memos i label of
-  Just (Just (i', node)) -> Right (node, (i', memos, drop (i' - i) xs, extra))
+useMemo label p = StateT $ \(ParseState i memos xs extra) -> case findMemo memos i label of
+  Just (Just (i', node)) -> Right (node, ParseState i' memos (drop (i' - i) xs) extra)
   Just Nothing -> Left memos
-  Nothing -> case runStateT p (i, memos, xs, extra) of
+  Nothing -> case runStateT p (ParseState i memos xs extra) of
     Left memos -> Left (addMemo memos i label Nothing)
-    Right (a, (i', memos, xs, extra)) -> Right (a, (i', addMemo memos i label (Just (i', a)), xs, extra))
+    Right (a, ps) -> Right (a, ps { psMemos = addMemo (psMemos ps) i label (Just (psPos ps, a)) })
 
   -- todo: make this an instance of Alternative
-(StateT a) <|> (StateT b) = StateT $ \(i, memos, xs, extra) -> case a (i, memos, xs, extra) of
-    Left memos -> b (i, memos, xs, extra)
+(StateT a) <|> (StateT b) = StateT $ \ps -> case a ps of
+    Left memos -> b (ps { psMemos = memos })
     y -> y
 
 forward :: Int -> StateT (ParseState t u n) (Either (Memos t n)) ()
 forward i' = do
-  (i, memos, text, extra) <- get
-  put (i + i', memos, drop i' text, extra)
+  ps <- get
+  put $ ps { psPos = psPos ps + i', psRest = drop i' (psRest ps) }
 
 string s = do
-  (_, memos, xs, _) <- get
-  unless (s `isPrefixOf` xs) $ lift $ Left memos
+  ps <- get
+  unless (s `isPrefixOf` psRest ps) returnFail
   forward $ length s
   return s
 
 guardText :: StateT (ParseState t u n) (Either (Memos t n)) (t, [t])
 guardText = do
-  (i, memos, text, _) <- get
-  when (null text) $ lift $ Left memos
-  return (head text, tail text)
+  ps <- get
+  when (null $ psRest ps) returnFail
+  let rest = psRest ps
+  return (head rest, tail rest)
 
 returnFail :: StateT (ParseState t u n) (Either (Memos t n)) v
 returnFail = do
-  (_, memos, _, _) <- get
-  lift $ Left memos
+  ps <- get
+  lift $ (Left . psMemos) ps
 
 many :: StateT (ParseState t u n) (Either (Memos t n)) [a] -> StateT (ParseState t u n) (Either (Memos t n)) [a]
 many p = StateT inner where
   inner s = case runStateT p s of
     Right (x', s') -> case runStateT (many p) s' of
       Right (x'', s'') -> Right (x' ++ x'', s'')
-      Left memos -> let (i', _, xs', extra) = s' in Right (x', (i', memos, xs', extra))
-    Left memos -> let (i, _, xs, extra) = s in Right ([], (i, memos, xs, extra))
+      Left memos -> Right (x', s' { psMemos = memos })
+    Left memos -> Right ([], s { psMemos = memos })
 
 manyOnes :: StateT (ParseState t u n) (Either (Memos t n)) a -> StateT (ParseState t u n) (Either (Memos t n)) [a]
 manyOnes p = StateT inner where
   inner s = case runStateT p s of
     Right (x', s') -> case runStateT (manyOnes p) s' of
       Right (x'', s'') -> Right (x':x'', s'')
-      Left memos -> let (i', _, xs', extra) = s' in Right ([x'], (i', memos, xs', extra))
-    Left memos -> let (i, _, xs, extra) = s in Right ([], (i, memos, xs, extra))
+      Left memos -> Right ([x'], s' { psMemos = memos })
+    Left memos -> Right ([], s { psMemos = memos })
 
 many1 p = do
   x <- p
@@ -92,7 +93,7 @@ charNot p = do
     Left memos -> do
       forward 1
       return [x]
-    Right (_, (_, memos, _, _)) -> returnFail
+    Right _ -> returnFail
 
 letter = do
   (x, _) <- guardText
@@ -108,6 +109,6 @@ digit = do
 many1Spaces = many1 (char ' ')
 manySpaces = many (char ' ')
 
-optional p = StateT $ \s -> case runStateT p s of
-  Left memos -> let (i, _, text, extra) = s in Right ([], (i, memos, text, extra))
-  Right x -> Right x
+-- optional p = StateT $ \s -> case runStateT p s of
+--   Left memos -> let (i, _, text, extra) = s in Right ([], (i, memos, text, extra))
+--   Right x -> Right x
