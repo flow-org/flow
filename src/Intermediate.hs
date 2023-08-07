@@ -189,15 +189,25 @@ modifyContext f = modify $ \is -> is { context = f $ context is }
 --   modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
 --   nextCounter
 
-matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
+-- matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
+-- matchOutsWithExpectedOuts a b = fst $ inner a b where
+--   inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
+--   inner [] inNodes = (([], inNodes), [])
+--   inner outs [] = (([], []), outs)
+--   inner outs (inNode:ys) =
+--     let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
+--     case b of
+--       hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
+--       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
+matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> [IInNode]
 matchOutsWithExpectedOuts a b = fst $ inner a b where
-  inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
-  inner [] inNodes = (([], inNodes), [])
-  inner outs [] = (([], []), outs)
+  inner :: [Exp] -> [IInNode] -> ([IInNode], [Exp])
+  -- inner [] _ = ([], [])
+  inner outs [] = ([], outs)
   inner outs (inNode:ys) =
     let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
     case b of
-      hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
+      hit:rest -> let (c, d) = inner (a ++ rest) ys in ((inNode, hit) : c1, d)
       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
 
 matchInsWithInNodes :: [String] -> [IInNode] -> [(NodeId, EdgeIndex)]
@@ -219,31 +229,40 @@ matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
   --   inner ((e@EOut _ (Just name)):xs) withNames withoutNames =
   --     let targetNode = find (\inNode -> expectedToConnectWith )
 
-handleMiddle :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
-handleMiddle (EMiddle ins e outs) externalIns = do
-  inNodes <- forM ins handleIn
-  (expectedOuts, _) <- handleMiddleOrPrimitive e (inNodes ++ externalIns)
-  let (matched, rest) = matchOutsWithExpectedOuts outs expectedOuts
-  ar <- forM matched (\(inNode, e) -> handleOut e inNode)
-  if null ar
-    then return (rest, rest)
-    else return (rest, last ar)
+-- handleMiddle :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
+-- handleMiddle (EMiddle e) inNodes = do
+--   expectedOuts <- handleMiddleOrPrimitive e inNodes
+--   let (matched, rest) = matchOutsWithExpectedOuts outs expectedOuts
+--   ar <- forM matched (\(inNode, e) -> handleOut e inNode)
+--   if null ar
+--     then return (rest, rest)
+--     else return (rest, last ar)
 
-handleIn :: Exp -> StateT IState (Either String) IInNode
-handleIn (EIn e _ to) = do -- from ignore : todo
-  (_, inNodes) <- handleMiddle e []
-  let lastNodeInNode = head inNodes
-  return $ lastNodeInNode { expectedToConnectWith = to }
+-- handleIn :: Exp -> StateT IState (Either String) IInNode
+-- handleIn (EIn e _ to) = do -- from ignore : todo
+--   (_, inNodes) <- handleMiddle e []
+--   let lastNodeInNode = head inNodes
+--   return $ lastNodeInNode { expectedToConnectWith = to }
 
-handleOut :: Exp -> IInNode -> StateT IState (Either String) [IInNode]
-handleOut (EOut e _ to) inNode = do
-  let inNodeToUse = inNode { expectedToConnectWith = to }
-  (_, lastNodeInNodes) <- handleMiddle e [inNodeToUse]
-  return lastNodeInNodes
+-- handleOut :: Exp -> IInNode -> StateT IState (Either String) [IInNode]
+-- handleOut (EOut e _ to) inNode = do
+--   let inNodeToUse = inNode { expectedToConnectWith = to }
+--   (_, lastNodeInNodes) <- handleMiddle e [inNodeToUse]
+--   return lastNodeInNodes
 
-handleMiddleOrPrimitive :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
-handleMiddleOrPrimitive e@(EMiddle {}) externalIns = handleMiddle e externalIns
-handleMiddleOrPrimitive (EVar varName) externalIns = do
+handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) IInNode
+handle (EIn seq from to : rest) ins _ = do
+  last <- handle seq [] []
+  handle rest (last : ins) []
+handle (EMiddle e : rest) ins _ = do
+  expectedOuts <- handlePrimitive e ins
+  handle rest [] expectedOuts
+handle (EOut seq from to : rest) _ outs = do
+  -- todo
+  handle rest [] outs
+
+handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
+handlePrimitive (EVar varName) externalIns = do
   let (inNames, outNames) = (requiredInputs varName, requiredOutputs varName)
   let edges = matchInsWithInNodes inNames externalIns
   counter <- next <$> get
@@ -253,8 +272,7 @@ handleMiddleOrPrimitive (EVar varName) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (IVar varName)
   nextCounter
-  let newInNodes = map (\outName -> IInNode counter outName Nothing) outNames
-  return (newInNodes, newInNodes)
+  return $ map (\outName -> IInNode counter outName Nothing) outNames
 handleMiddleOrPrimitive (ENum i GMPassive) externalIns = do
   let edges = matchInsWithInNodes ["a"] externalIns
   counter <- next <$> get
@@ -264,15 +282,13 @@ handleMiddleOrPrimitive (ENum i GMPassive) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (INum i GMPassive)
   nextCounter
-  let newInNodes = [IInNode counter "result" Nothing]
-  return (newInNodes, newInNodes)
+  return [IInNode counter "result" Nothing]
 handleMiddleOrPrimitive (ENum i gm) externalIns = do
   counter <- next <$> get
   modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
   appendNode (INum i gm)
   nextCounter
-  let newInNodes = [IInNode counter "result" Nothing]
-  return (newInNodes, newInNodes)
+  return [IInNode counter "result" Nothing]
 handleMiddleOrPrimitive (ERef ref) externalIns = do
   is <- get
   let refList = refs is
@@ -289,14 +305,13 @@ handleMiddleOrPrimitive (ERef ref) externalIns = do
               let newNodes = appendEdge nid edgeIndex refnid (currentNodes is)
               modify (\is -> is { currentNodes = newNodes }))
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
-            return ([], [])
+            return []
         else
           -- todo: disable produced check
           if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
           else do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
-            let newInNodes = [IInNode refnid "refOut" Nothing]
-            return (newInNodes, newInNodes)
+            return [IInNode refnid "refOut" Nothing]
     Nothing -> do
       appendNode (IRef ref)
       if isConsumer
@@ -308,13 +323,13 @@ handleMiddleOrPrimitive (ERef ref) externalIns = do
             let newNodes = appendEdge nid edgeIndex (next is) (currentNodes is)
             modify (\is -> is { currentNodes = newNodes }))
           nextCounter
-          return ([], [])
+          return []
         else do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
           counter <- next <$> get
           let newInNodes = [IInNode counter "refOut" Nothing]
           nextCounter
-          return (newInNodes, newInNodes)
+          return newInNodes
 
 -- do
 --   inNodes <- forM ins handleIn
