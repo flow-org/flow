@@ -196,7 +196,9 @@ matchOutsWithExpectedOuts a b = fst $ inner a b where
   inner [] inNodes = (([], inNodes), [])
   inner outs [] = (([], []), outs)
   inner outs (inNode:ys) =
-    let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
+    let (a, b) = span (\n -> (case n of
+          EOut _ x _ -> x
+          EBi _ x _ _ _ -> x) /= Just (fromName inNode)) outs in
     case b of
       hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
@@ -272,6 +274,10 @@ handle (EOut seq _ _ : rest) _ (headOut : tailOuts) = do
   if null rest
     then if null tailOuts then return Nothing else return $ Just (head tailOuts)
     else handle rest [] tailOuts
+handle (EBi seq _ _ _ to : rest) ins (headOut : tailOuts) = do
+  result <- handle seq [headOut] []
+  let (Just last) = result
+  handle rest (last { expectedToConnectWith = to } : ins) tailOuts
 
 handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
 handlePrimitive (EVar varName) externalIns = do

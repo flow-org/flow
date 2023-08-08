@@ -9,7 +9,7 @@ data Exp =
     EMiddle { exPrim :: Exp }
   | EIn { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
   | EOut { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
-  | EBi { exSeq :: [Exp], inFrom :: Maybe String, inTo :: Maybe String, outFrom :: Maybe String, outTo :: Maybe String }
+  | EBi { exSeq :: [Exp], outFrom :: Maybe String, outTo :: Maybe String, inFrom :: Maybe String, inTo :: Maybe String }
   | EVar String
   | ENum Int GenMode
   | ERef String
