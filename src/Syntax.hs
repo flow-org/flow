@@ -4,7 +4,7 @@ data ArrowMode = Normal | Buf | Notify deriving Show
 data Arrow =
     AToLeft  ArrowMode (Maybe String) (Maybe String)
   | AToRight ArrowMode (Maybe String) (Maybe String) deriving Show
-data GenMode = GMAlways | GMOnce | GMPassive deriving Show
+data GenMode = GMAlways | GMOnce | GMPassive deriving (Show, Eq)
 data Exp =
     EMiddle { exPrim :: Exp }
   | EIn { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
@@ -13,5 +13,5 @@ data Exp =
   | EVar String
   | ENum Int GenMode
   | ERef String
-  | EAddress String deriving Show
+  | EAddress String deriving (Show, Eq)
 data Command = CExp Exp | CDecl String Exp | CSpawn String Exp deriving Show

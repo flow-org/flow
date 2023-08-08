@@ -21,6 +21,8 @@ main = do
           Just _ -> return ()
           Nothing -> putStrLn "terminated")
 
+-- import System.IO
+-- hSetBuffering stdin LineBuffering
 -- checks
 -- let (Right x) = parse "1! -> if (then:-> 2 -> output) (else:-> 3 -> output)" in convert x
 -- let (Right x) = parse "@a -> (1! ->) merge -> (1* ->) + -> trace -> @a" in convert x

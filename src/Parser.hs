@@ -63,7 +63,8 @@ inn = (useMemo "inn" (do
   char '('
   manySpaces
   seq <- entry
-  many1Spaces
+  ps <- get
+  -- many1Spaces
   label1 <- arrowLabelLeft
   arrow
   label2 <- arrowLabelRight

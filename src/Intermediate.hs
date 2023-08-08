@@ -8,6 +8,7 @@ import Debug.Trace (trace)
 import Control.Monad (forM)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, modifySTRef, readSTRef, writeSTRef)
+import Data.Foldable (find)
 -- data IGraph a = INode { label :: a, value :: Intermediate, adjacent :: [IGraph a] } deriving Show
 data Intermediate = IVar String | INum Int GenMode | IRef String | IAddress String deriving Show
 type NodeId = Int
@@ -189,26 +190,30 @@ modifyContext f = modify $ \is -> is { context = f $ context is }
 --   modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
 --   nextCounter
 
--- matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
--- matchOutsWithExpectedOuts a b = fst $ inner a b where
---   inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
---   inner [] inNodes = (([], inNodes), [])
---   inner outs [] = (([], []), outs)
---   inner outs (inNode:ys) =
---     let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
---     case b of
---       hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
---       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
-matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> [IInNode]
+matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
 matchOutsWithExpectedOuts a b = fst $ inner a b where
-  inner :: [Exp] -> [IInNode] -> ([IInNode], [Exp])
-  -- inner [] _ = ([], [])
-  inner outs [] = ([], outs)
+  inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
+  inner [] inNodes = (([], inNodes), [])
+  inner outs [] = (([], []), outs)
   inner outs (inNode:ys) =
     let (a, b) = span (\(EOut _ x _) -> x /= Just (fromName inNode)) outs in
     case b of
-      hit:rest -> let (c, d) = inner (a ++ rest) ys in ((inNode, hit) : c1, d)
+      hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
+sortExpectedOuts :: [Exp] -> [IInNode] -> [IInNode]
+sortExpectedOuts exps inNodes =
+  let outs = takeWhile (\out -> case out of
+            EOut _ _ _ -> True
+            EBi _ _ _ _ _ -> True
+            _ -> False) exps in
+  let matched = fst $ matchOutsWithExpectedOuts outs inNodes in
+  inner matched outs
+  where
+    inner :: [(IInNode, Exp)] -> [Exp] -> [IInNode]
+    inner _ [] = []
+    inner matched (x : xs) =
+      let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in
+        inNode : inner matched xs
 
 matchInsWithInNodes :: [String] -> [IInNode] -> [(NodeId, EdgeIndex)]
 matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
@@ -250,16 +255,23 @@ matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
 --   (_, lastNodeInNodes) <- handleMiddle e [inNodeToUse]
 --   return lastNodeInNodes
 
-handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) IInNode
-handle (EIn seq from to : rest) ins _ = do
-  last <- handle seq [] []
-  handle rest (last : ins) []
+handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) (Maybe IInNode)
+handle (EIn seq _ to : rest) ins _ = do
+  result <- handle seq [] []
+  let (Just last) = result
+  handle rest (last { expectedToConnectWith = to } : ins) []
 handle (EMiddle e : rest) ins _ = do
   expectedOuts <- handlePrimitive e ins
-  handle rest [] expectedOuts
-handle (EOut seq from to : rest) _ outs = do
-  -- todo
-  handle rest [] outs
+  if null rest
+    then return $ Just (head expectedOuts)
+    else do
+      let sorted = sortExpectedOuts rest expectedOuts
+      handle rest [] sorted
+handle (EOut seq _ _ : rest) _ (headOut : tailOuts) = do
+  handle seq [headOut] []
+  if null rest
+    then if null tailOuts then return Nothing else return $ Just (head tailOuts)
+    else handle rest [] tailOuts
 
 handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
 handlePrimitive (EVar varName) externalIns = do
@@ -273,7 +285,7 @@ handlePrimitive (EVar varName) externalIns = do
   appendNode (IVar varName)
   nextCounter
   return $ map (\outName -> IInNode counter outName Nothing) outNames
-handleMiddleOrPrimitive (ENum i GMPassive) externalIns = do
+handlePrimitive (ENum i GMPassive) externalIns = do
   let edges = matchInsWithInNodes ["a"] externalIns
   counter <- next <$> get
   forM_ edges (\(nid, edgeIndex) -> do
@@ -283,13 +295,13 @@ handleMiddleOrPrimitive (ENum i GMPassive) externalIns = do
   appendNode (INum i GMPassive)
   nextCounter
   return [IInNode counter "result" Nothing]
-handleMiddleOrPrimitive (ENum i gm) externalIns = do
+handlePrimitive (ENum i gm) externalIns = do
   counter <- next <$> get
   modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
   appendNode (INum i gm)
   nextCounter
   return [IInNode counter "result" Nothing]
-handleMiddleOrPrimitive (ERef ref) externalIns = do
+handlePrimitive (ERef ref) externalIns = do
   is <- get
   let refList = refs is
   let isConsumer = length externalIns > 0 -- this check may be inappropriate
@@ -336,8 +348,8 @@ handleMiddleOrPrimitive (ERef ref) externalIns = do
 --   expectedOuts <- handleMiddleOrPrimitive e (inNodes ++ externalIns)
 --   forM outs handleOut
 
-convert :: Exp -> Either String (Map.Map Int INode, IContext)
-convert exp = case execStateT (handleMiddle exp []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+convert :: [Exp] -> Either String (Map.Map Int INode, IContext)
+convert exps = trace (show exps) $ case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 

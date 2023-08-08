@@ -181,11 +181,11 @@ factoryGenValue evc (INum i GMOnce) outParticles _ =
   then return $ Just OutNoOp
   else return $ Just $ OutAppend [("result", VInt i)]
 
-eval :: Command -> StateT (Maybe EvState) IO ()
-eval (CExp exp) = do
-  case convert exp of
-    Left err -> lift $ putStrLn err
-    Right (m, c) -> put $ Just $ EvState (toGraph m) c emptyEvContext
+-- eval :: Command -> StateT (Maybe EvState) IO ()
+-- eval (CExp exp) = do
+--   case convert exp of
+--     Left err -> lift $ putStrLn err
+--     Right (m, c) -> put $ Just $ EvState (toGraph m) c emptyEvContext
 -- eval (CSpawn address exp) = do
 --   state <- get
 --   case state of
