@@ -36,22 +36,28 @@ requiredInputs "+" = ["a", "b"]
 requiredInputs "-" = ["a", "b"]
 requiredInputs "*" = ["a", "b"]
 requiredInputs "/" = ["a", "b"]
+requiredInputs "==" = ["a", "b"]
 requiredInputs "input" = []
 requiredInputs "output" = ["a"]
 requiredInputs "trace" = ["a"]
 requiredInputs "merge" = ["a", "b"] -- todo
+requiredInputs "copy" = ["a"] -- todo
 requiredInputs "if" = ["condition"]
+requiredInputs "control" = ["en", "value"]
 
 requiredOutputs :: String -> [String]
 requiredOutputs "+" = ["result"]
 requiredOutputs "-" = ["result"]
 requiredOutputs "*" = ["result"]
 requiredOutputs "/" = ["result"]
+requiredOutputs "==" = ["result"]
 requiredOutputs "input" = ["result"]
 requiredOutputs "output" = []
 requiredOutputs "trace" = ["result"]
 requiredOutputs "merge" = ["result"]
+requiredOutputs "copy" = ["copyA", "copyB"]
 requiredOutputs "if" = ["then", "else"]
+requiredOutputs "control" = ["result"]
 
 appendEdge :: NodeId -> EdgeIndex -> NodeId -> Map.Map NodeId INode -> Map.Map NodeId INode
 appendEdge nid eidx nidTo = Map.alter inner nid where
@@ -68,7 +74,7 @@ pickAvailableItemToConsume inName = do
   if null (available is)
   then lift $ Left ("AST Node " ++ show (Map.lookup (next is) $ currentNodes is) ++ " cannot receive sufficient inputs.")
   else case consumeLabelStack is of
-    seekingOutName:restStack -> let (c, d) = trace (show $ available is) span (\ia -> outName ia /= seekingOutName) (available is) in
+    seekingOutName:restStack -> let (c, d) = span (\ia -> outName ia /= seekingOutName) (available is) in
       (case d of
         desired:rest -> do
           modify (\is -> is { consumeLabelStack = restStack, available = c ++ rest })
@@ -218,7 +224,7 @@ sortExpectedOuts exps inNodes =
         inNode : inner matched xs
 
 matchInsWithInNodes :: [String] -> [IInNode] -> [(NodeId, EdgeIndex)]
-matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
+matchInsWithInNodes a b = fst $ inner a b where
   inner :: [String] -> [IInNode] -> ([(NodeId, EdgeIndex)], [IInNode])
   inner [] rest = ([], rest)
   inner (inn:xs) inNodes =
@@ -258,7 +264,7 @@ matchInsWithInNodes a b = trace (show (a, b)) fst $ inner a b where
 --   return lastNodeInNodes
 
 handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) (Maybe IInNode)
-handle (EIn seq _ to : rest) ins _ = do
+handle e@(EIn seq _ to : rest) ins _ = do
   result <- handle seq [] []
   let (Just last) = result
   handle rest (last { expectedToConnectWith = to } : ins) []
@@ -269,15 +275,21 @@ handle (EMiddle e : rest) ins _ = do
     else do
       let sorted = sortExpectedOuts rest expectedOuts
       handle rest [] sorted
-handle (EOut seq _ _ : rest) _ (headOut : tailOuts) = do
-  handle seq [headOut] []
+handle e@(EOut seq _ _ : rest) _ (headOut : tailOuts) = do
+  last <- handle seq [headOut] []
   if null rest
-    then if null tailOuts then return Nothing else return $ Just (head tailOuts)
+    then if null tailOuts
+      then return last
+      else return $ Just (head tailOuts)
     else handle rest [] tailOuts
 handle (EBi seq _ _ _ to : rest) ins (headOut : tailOuts) = do
   result <- handle seq [headOut] []
   let (Just last) = result
   handle rest (last { expectedToConnectWith = to } : ins) tailOuts
+
+handleMultiline :: [[Exp]] -> StateT IState (Either String) ()
+handleMultiline [] = return ()
+handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
 
 handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
 handlePrimitive (EVar varName) externalIns = do
@@ -324,10 +336,10 @@ handlePrimitive (ERef ref) externalIns = do
               modify (\is -> is { currentNodes = newNodes }))
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
             return []
-        else
+        else do
           -- todo: disable produced check
-          if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
-          else do
+          -- if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
+          -- else do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
             return [IInNode refnid "refOut" Nothing]
     Nothing -> do
@@ -355,10 +367,15 @@ handlePrimitive (ERef ref) externalIns = do
 --   forM outs handleOut
 
 convert :: [Exp] -> Either String (Map.Map Int INode, IContext)
-convert exps = trace (show exps) $ case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+convert exps = case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
+
+convertMultiline :: [[Exp]] -> Either String (Map.Map Int INode, IContext)
+convertMultiline exps = case execStateT (handleMultiline exps) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+  Left err -> Left err
+  Right is -> Right (currentNodes is, context is)
 -- contrLinks :: [(a, a)] -> [(a, [a])]
 -- contrLinks 
 

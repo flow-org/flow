@@ -14,7 +14,14 @@ import Debug.Trace
 --   return exp
 
 allowedLetter :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
-allowedLetter = letter <|> digit <|> char '+' <|> char '*' <|> char '/' <|> char '-'
+allowedLetter =
+      letter
+  <|> digit
+  <|> char '+'
+  <|> char '*'
+  <|> char '/'
+  <|> char '-'
+  <|> (char '=' >> char '=' >> return "==")
 
 -- var = EVar <$> ((++) <$> (return <$> letter) <*> many (letter <|> digit))
 var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp

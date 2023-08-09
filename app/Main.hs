@@ -1,13 +1,16 @@
 module Main where
 
-import qualified MyLib (someFunc)
--- import Runner (run)
 import Parser
 import Intermediate
 import Interpreter (runGraph, toGraph, EvContext (EvContext))
 
+import Debug.Trace
+
+import System.IO
+
 main :: IO ()
 main = do
+  hSetBuffering stdin LineBuffering
   putStr "> "
   x <- getLine
   case parse x of
@@ -21,11 +24,15 @@ main = do
           Just _ -> return ()
           Nothing -> putStrLn "terminated")
 
--- import System.IO
--- hSetBuffering stdin LineBuffering
 -- checks
 -- let (Right x) = parse "1! -> if (then:-> 2 -> output) (else:-> 3 -> output)" in convert x
 -- let (Right x) = parse "@a -> (1! ->) merge -> (1* ->) + -> trace -> @a" in convert x
+-- let (Right x) = parse "@current -> (5! ->) == -> if (then:->:en (@result ->) control -> output) (else:-> copy (->:en (@result ->) control -> @next) (->:en (@current -> (1* ->) + ->) control -> @current))" in x
+check = 
+  let x =
+        (let (Right l1) = parse "@next -> (1! ->) merge -> (@current -> (1! ->) merge ->) * -> @result" in
+        let (Right l2) = parse "@current -> (5! ->) == -> if (then:->:en (@result ->) control -> output) (else:-> copy (->:en (@result ->) control -> @next) (->:en (@current -> (1* ->) + ->) control -> @current))" in
+          convertMultiline [l1, l2]) in x
 
 -- test = do
 --   case parse "0! -> if then:-> 2 else:-> 3 -> merge -> output" of
