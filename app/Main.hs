@@ -31,7 +31,7 @@ run expses = case convertMultiline expses of
   Right (m, ic) -> do
     trace (show m) return ()
     let graph = toGraph m
-    result <- runGraph graph ic (EvContext [] 0)
+    result <- runGraph graph ic
     case result of
       Just _ -> return ()
       Nothing -> putStrLn "terminated"
