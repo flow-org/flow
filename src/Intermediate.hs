@@ -63,48 +63,11 @@ appendEdge :: NodeId -> EdgeIndex -> NodeId -> Map.Map NodeId INode -> Map.Map N
 appendEdge nid eidx nidTo = Map.alter inner nid where
   inner = \case Just (INode value adj) -> Just $ INode value ((eidx, nidTo) : adj)
                 Nothing -> Nothing
-modifyCurrentNodes :: Monad m => (Map.Map NodeId INode -> Map.Map NodeId INode) -> StateT IState m ()
-modifyCurrentNodes f = do
-  is <- get
-  let nodes = currentNodes is
-  put $ is { currentNodes = f nodes }
-pickAvailableItemToConsume :: String -> StateT IState (Either String) IAvailable
-pickAvailableItemToConsume inName = do
-  is <- get
-  if null (available is)
-  then lift $ Left ("AST Node " ++ show (Map.lookup (next is) $ currentNodes is) ++ " cannot receive sufficient inputs.")
-  else case consumeLabelStack is of
-    seekingOutName:restStack -> let (c, d) = span (\ia -> outName ia /= seekingOutName) (available is) in
-      (case d of
-        desired:rest -> do
-          modify (\is -> is { consumeLabelStack = restStack, available = c ++ rest })
-          return desired
-        [] -> lift $ Left ("Specified product " ++ seekingOutName ++ " is not found."))
-    [] -> do
-      let (a, b) = span (\ia -> seekingInName ia /= Just inName) (available is)
-      (case b of
-        desired:rest -> modify (\is -> is { available = a ++ rest }) >> return desired
-        [] -> let (head:tail) = available is in modify (\is -> is { available = tail }) >> return head)
-consume :: [String] -> StateT IState (Either String) ()
-consume [] = return ()
-consume (inName:xs) = do
-  (IAvailable nid outName _) <- pickAvailableItemToConsume inName
-  is <- get
-  let newNodes = appendEdge nid (outName, inName) (next is) (currentNodes is)
-  modify (\is -> is { currentNodes = newNodes })
-  consume xs
-
-produce :: Monad m => [String] -> StateT IState m ()
-produce [] = return ()
-produce (outName:xs) = modify (\is -> is { available = IAvailable (next is) outName Nothing : available is}) >> produce xs
-
 appendNode :: Monad m => Intermediate -> StateT IState m ()
 appendNode node =
   modify $ \is -> is { currentNodes = Map.insert (next is) (INode node []) (currentNodes is) }
 nextCounter :: Monad m => StateT IState m ()
 nextCounter = modify $ \is -> is { next = next is + 1 }
-currentCounter :: Monad m => StateT IState m Int
-currentCounter = next <$> get
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
 modifyContext f = modify $ \is -> is { context = f $ context is }
 
@@ -144,36 +107,6 @@ matchInsWithInNodes a b = fst $ inner a b where
     case b of
       hit:rest -> let (c, d) = inner xs (a ++ rest) in ((fromNid hit, (fromName hit, inn)) : c, d)
       [] -> let (c, head:tail) = inner xs inNodes in ((fromNid head, (fromName head, inn)) : c, tail)
-
-  -- let (withNames, withoutNames) = partition (\inNode -> isJust $ expectedToConnectWith inNode) inNodes in
-  -- inner outs withNames withoutNames where
-  --   inner [] rest1 rest2 = ([], rest1 ++ rest2)
-  --   inner outs [] withoutNames =
-  --     let dropped = drop (length outs) withoutNames in
-  --     (zip withoutNames outs, dropped)
-  --   inner ((e@EOut _ (Just name)):xs) withNames withoutNames =
-  --     let targetNode = find (\inNode -> expectedToConnectWith )
-
--- handleMiddle :: Exp -> [IInNode] -> StateT IState (Either String) ([IInNode], [IInNode])
--- handleMiddle (EMiddle e) inNodes = do
---   expectedOuts <- handleMiddleOrPrimitive e inNodes
---   let (matched, rest) = matchOutsWithExpectedOuts outs expectedOuts
---   ar <- forM matched (\(inNode, e) -> handleOut e inNode)
---   if null ar
---     then return (rest, rest)
---     else return (rest, last ar)
-
--- handleIn :: Exp -> StateT IState (Either String) IInNode
--- handleIn (EIn e _ to) = do -- from ignore : todo
---   (_, inNodes) <- handleMiddle e []
---   let lastNodeInNode = head inNodes
---   return $ lastNodeInNode { expectedToConnectWith = to }
-
--- handleOut :: Exp -> IInNode -> StateT IState (Either String) [IInNode]
--- handleOut (EOut e _ to) inNode = do
---   let inNodeToUse = inNode { expectedToConnectWith = to }
---   (_, lastNodeInNodes) <- handleMiddle e [inNodeToUse]
---   return lastNodeInNodes
 
 handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) (Maybe IInNode)
 handle e@(EIn seq _ to : rest) ins _ = do
@@ -249,9 +182,6 @@ handlePrimitive (ERef ref) externalIns = do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
             return []
         else do
-          -- todo: disable produced check
-          -- if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
-          -- else do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { usedCount = count + 1 })) ref refList }
             return [IInNode refnid ("refOut" ++ show count) Nothing]
     Nothing -> do
@@ -277,7 +207,6 @@ convert :: [Exp] -> Either String (Map.Map Int INode, IContext)
 convert exps = case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
-
 
 convertMultiline :: [[Exp]] -> Either String (Map.Map Int INode, IContext)
 convertMultiline exps = case execStateT (handleMultiline exps) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
