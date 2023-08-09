@@ -8,6 +8,7 @@ import Interpreter (runGraph, toGraph, EvContext (EvContext))
 import Debug.Trace
 
 import System.IO
+import Control.Monad (forM)
 
 main :: IO ()
 main = loop []
@@ -24,12 +25,16 @@ loop expses = do
       CImRun exps -> run [exps] >> loop []
       CDecl newExps -> loop (newExps : expses)
       CRun -> run expses >> loop []
+      CLoad fileName -> do
+        content <- readFile fileName
+        case forM (lines content) parseExp of
+          Left a -> print ("parse fail: " ++ a)
+          Right a -> run a >> loop []
       CExit -> return ())
 
 run expses = case convertMultiline expses of
   Left a -> print a
   Right (m, ic) -> do
-    trace (show m) return ()
     let graph = toGraph m
     result <- runGraph graph ic
     case result of

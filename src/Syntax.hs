@@ -18,4 +18,5 @@ data Command =
     CImRun [Exp]
   | CDecl [Exp]
   | CRun
-  | CExit deriving Show
+  | CExit
+  | CLoad String deriving Show

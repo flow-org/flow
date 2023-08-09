@@ -118,7 +118,16 @@ parseCommand = (do
   return $ CImRun exps)
   <|> (string "run" >> return CRun)
   <|> (string "exit" >> return CExit)
+  <|> (do
+    string "load"
+    many1Spaces
+    rest <- psRest <$> get
+    return $ CLoad rest)
   <|> (CDecl <$> entry)
+
+parseExp text = case evalStateT entry (ParseState 0 initMemos text ()) of
+  Left _ -> Left "parse error"
+  Right e -> Right e
 
 parse text = case evalStateT parseCommand (ParseState 0 initMemos text ()) of
   Left _ -> Left "parse error"
