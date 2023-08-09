@@ -7,12 +7,6 @@ import Control.Monad.State (evalStateT)
 import Control.Monad.Trans.State (StateT, get)
 import Debug.Trace
 
--- parens = do
---   char '('
---   exp <- eexp
---   char ')'
---   return exp
-
 allowedLetter :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
 allowedLetter =
       letter
@@ -116,36 +110,6 @@ bi = useMemo "bi" (do
 
 entry :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
 entry = inn
-
--- arrow = do
---   label1 <- arrowLabelLeft
---   (do
---     char '<'
---     char '-'
---     label2 <- arrowLabelRight
---     return $ AToLeft Normal label2 label1) <|> (do
---     char '-'
---     char '>'
---     label2 <- arrowLabelRight
---     return $ AToRight Normal label1 label2)
-
--- eexp = do
---   head <- primitive
---   tail <- many (do
---     spaces
---     a <- arrow
---     spaces
---     item <- primitive
---     return (a, item)) <|> return []
---   case tail of
---     [] -> return head
---     _ -> return $ foldl (\left (arrow, right) -> EConnect arrow left right) head tail
-
--- main = do
---   parseTest eexp "a -> b <- c <- d"
---   parseTest eexp "input -> (1 -> +) -> output"
---   parseTest eexp "1 -> + <- 2 -> output"
---   parseTest eexp "@a <- trace <- + <- 1 <- @a"
 
 parse text = case evalStateT entry (ParseState 0 initMemos text ()) of
   Left _ -> Left "parse error"

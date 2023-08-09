@@ -108,7 +108,3 @@ digit = do
 
 many1Spaces = many1 (char ' ')
 manySpaces = many (char ' ')
-
--- optional p = StateT $ \s -> case runStateT p s of
---   Left memos -> let (i, _, text, extra) = s in Right ([], (i, memos, text, extra))
---   Right x -> Right x

@@ -94,27 +94,10 @@ consume (inName:xs) = do
   modify (\is -> is { currentNodes = newNodes })
   consume xs
 
--- consume inNames = do
---   is <- get
---   if length inNames > length (available is)
---   then lift $ Left ("AST Node " ++ show (Map.lookup (next is) $ currentNodes is) ++ " cannot receive sufficient inputs.")
---   else do
---     let (uses, rest) = splitAt requires (available is)
---     let newNodes = runST $ do
---           nodes <- newSTRef $ currentNodes is
---           forM_ (zip uses (iterate (+1) 0)) (\(id, index) -> do
---             nextNodes <- appendEdge id index (next is) <$> readSTRef nodes
---             -- nextNodes <- Map.alter
---             --   (\case Just (INode value adj) -> Just $ INode value ((index, next is) : adj)
---             --          Nothing -> Nothing) id <$> readSTRef nodes
---             writeSTRef nodes nextNodes)
---           readSTRef nodes
---     put $ is { currentNodes = newNodes, available = rest }
 produce :: Monad m => [String] -> StateT IState m ()
 produce [] = return ()
 produce (outName:xs) = modify (\is -> is { available = IAvailable (next is) outName Nothing : available is}) >> produce xs
--- produce requires =
---   modify $ \is -> is { available = replicate requires (next is) ++ available is }
+
 appendNode :: Monad m => Intermediate -> StateT IState m ()
 appendNode node =
   modify $ \is -> is { currentNodes = Map.insert (next is) (INode node []) (currentNodes is) }
@@ -124,77 +107,6 @@ currentCounter :: Monad m => StateT IState m Int
 currentCounter = next <$> get
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
 modifyContext f = modify $ \is -> is { context = f $ context is }
-
--- convertIntermediate :: Exp -> StateT IState (Either String) ()
--- convertIntermediate (EVar varName) = do
---   appendNode (IVar varName)
---   let (inNames, outNames) = (requiredInputs varName, requiredOutputs varName)
---   consume inNames
---   produce outNames
---   nextCounter
---     -- _ -> lift $ Left (varName ++ " is not defined")
--- convertIntermediate (EConnect arrow l r) = (case arrow of
---   AToLeft _ inLabel outLabel -> inner r l inLabel outLabel
---   AToRight _ inLabel outLabel -> inner l r inLabel outLabel) where
---     inner from to inLabel outLabel = do
---       convertIntermediate from
---       (case inLabel of
---         Just inLabelStr -> modify $ \is -> is { consumeLabelStack = inLabelStr : consumeLabelStack is }
---         Nothing -> return ())
---       -- (case outLabel of
---       --   Just outLabelStr -> ) -- todo: it is needed to memorize the last created edge
---       convertIntermediate to
--- convertIntermediate (ENum i GMPassive) = do
---   appendNode (INum i GMPassive)
---   consume ["a"]
---   produce ["result"]
---   nextCounter
--- convertIntermediate (ENum i gm) = do
---   appendNode (INum i gm)
---   produce ["result"]
---   id <- currentCounter
---   modifyContext $ \ic -> ic { genNodes = id : genNodes ic }
---   nextCounter
--- convertIntermediate (ERef ref) = do -- todo
---   is <- get
---   let refList = refs is
---   let isConsumer = length (available is) > 0 -- this check may be inappropriate
---   case Map.lookup ref refList of
---     Just (IRefState refnid produced consumed) ->
---       if isConsumer
---         then
---           if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
---           else do
---             (IAvailable nid outName _) <- pickAvailableItemToConsume "refIn"
---             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { consumed = True })) ref refList }
---             modifyCurrentNodes $ appendEdge nid (outName, "refIn") refnid
---         else
---           if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
---           else do
---             modify $ \is -> is { available = IAvailable refnid "refOut" Nothing : available is, refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
---     Nothing -> do
---       appendNode (IRef ref)
---       if isConsumer
---         then do
---           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) False True) refList }
---           consume ["refIn"]
---           nextCounter
---         else do
---           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
---           produce ["refOut"]
---           nextCounter
-
---   appendNode (IRef ref)
---   consume $ length $ available is
---   produce 1
---   nextCounter
--- convertIntermediate (EAddress address) = do -- todo
---   currentInNodes <- inNodes <$> get
---   appendNode (IAddress address)
---   consume ["addressIn"]
---   produce ["addressOut"]
---   modifyContext $ \ic -> ic { addresses = Map.insert address (next is) (addresses ic) }
---   nextCounter
 
 matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
 matchOutsWithExpectedOuts a b = fst $ inner a b where
@@ -361,11 +273,6 @@ handlePrimitive (ERef ref) externalIns = do
           nextCounter
           return newInNodes
 
--- do
---   inNodes <- forM ins handleIn
---   expectedOuts <- handleMiddleOrPrimitive e (inNodes ++ externalIns)
---   forM outs handleOut
-
 convert :: [Exp] -> Either String (Map.Map Int INode, IContext)
 convert exps = case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
@@ -376,7 +283,3 @@ convertMultiline :: [[Exp]] -> Either String (Map.Map Int INode, IContext)
 convertMultiline exps = case execStateT (handleMultiline exps) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
--- contrLinks :: [(a, a)] -> [(a, [a])]
--- contrLinks 
-
-            -- let newLinks = updateWithKey (\k x -> Just $ if elem k uses then next : x else x) links in do
