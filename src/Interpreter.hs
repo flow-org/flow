@@ -165,10 +165,10 @@ factoryValue _ (INum i GMPassive) inParticles _ outParticles _ = do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else return $ Just (InFlush, OutAppend [("result", VInt i)])
-factoryValue _ (IRef _) inParticles@[(_, v)] _ outParticles _ = do
+factoryValue _ (IRef _) inParticles@[(_, v)] _ outParticles maxOuts = do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
-  else return $ Just (InFlush, OutAppend [("refOut", v)])
+  else return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1])
 factoryValue _ v _ _ _ _ = trace (show v) return Nothing
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)

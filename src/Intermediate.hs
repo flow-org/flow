@@ -14,7 +14,7 @@ data Intermediate = IVar String | INum Int GenMode | IRef String | IAddress Stri
 type NodeId = Int
 type EdgeIndex = (String, String)
 data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
-data IRefState = IRefState { refNodeId :: NodeId, produced :: Bool, consumed :: Bool } deriving Show
+data IRefState = IRefState { refNodeId :: NodeId, usedCount :: Int, consumed :: Bool } deriving Show
 data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
 data IAvailable = IAvailable { aNodeId :: NodeId, outName :: String, seekingInName :: Maybe String } deriving Show
 
@@ -236,7 +236,7 @@ handlePrimitive (ERef ref) externalIns = do
   let refList = refs is
   let isConsumer = length externalIns > 0 -- this check may be inappropriate
   case Map.lookup ref refList of
-    Just (IRefState refnid produced consumed) ->
+    Just (IRefState refnid count consumed) ->
       if isConsumer
         then
           if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
@@ -252,13 +252,13 @@ handlePrimitive (ERef ref) externalIns = do
           -- todo: disable produced check
           -- if produced then lift $ Left ("Ref " ++ ref ++ " is already produced")
           -- else do
-            modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { produced = True })) ref refList }
-            return [IInNode refnid "refOut" Nothing]
+            modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { usedCount = count + 1 })) ref refList }
+            return [IInNode refnid ("refOut" ++ show count) Nothing]
     Nothing -> do
       appendNode (IRef ref)
       if isConsumer
         then do
-          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) False True) refList }
+          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) 0 True) refList }
           let edges = matchInsWithInNodes ["refIn"] externalIns
           forM_ edges (\(nid, edgeIndex) -> do
             is <- get
@@ -267,9 +267,9 @@ handlePrimitive (ERef ref) externalIns = do
           nextCounter
           return []
         else do
-          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) True False) refList }
+          modify $ \is -> is { refs = Map.insert ref (IRefState (next is) 1 False) refList }
           counter <- next <$> get
-          let newInNodes = [IInNode counter "refOut" Nothing]
+          let newInNodes = [IInNode counter "refOut0" Nothing]
           nextCounter
           return newInNodes
 
