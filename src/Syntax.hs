@@ -14,4 +14,8 @@ data Exp =
   | ENum Int GenMode
   | ERef String
   | EAddress String deriving (Show, Eq)
-data Command = CExp Exp | CDecl String Exp | CSpawn String Exp deriving Show
+data Command = 
+    CImRun [Exp]
+  | CDecl [Exp]
+  | CRun
+  | CExit deriving Show

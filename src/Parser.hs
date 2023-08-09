@@ -111,6 +111,15 @@ bi = useMemo "bi" (do
 entry :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
 entry = inn
 
-parse text = case evalStateT entry (ParseState 0 initMemos text ()) of
+parseCommand = (do
+  string "run"
+  many1Spaces
+  exps <- entry
+  return $ CImRun exps)
+  <|> (string "run" >> return CRun)
+  <|> (string "exit" >> return CExit)
+  <|> (CDecl <$> entry)
+
+parse text = case evalStateT parseCommand (ParseState 0 initMemos text ()) of
   Left _ -> Left "parse error"
   Right e -> Right e
