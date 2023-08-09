@@ -55,7 +55,7 @@ requiredOutputs "input" = ["result"]
 requiredOutputs "output" = []
 requiredOutputs "trace" = ["result"]
 requiredOutputs "merge" = ["result"]
-requiredOutputs "copy" = ["copyA", "copyB"]
+requiredOutputs "copy" = ["copy0", "copy1"]
 requiredOutputs "if" = ["then", "else"]
 requiredOutputs "control" = ["result"]
 

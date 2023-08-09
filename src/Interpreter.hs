@@ -59,7 +59,9 @@ runGraph graph ic evc = runMaybeT $ do
   trace (show evc) return ()
   nextEvc <- MaybeT $ factoryNextEvc graph evc
   nextEvcGenerated <- MaybeT $ factoryNextGenerated graph evc (genNodes ic)
-  MaybeT $ runGraph graph ic $ EvContext { particles = nextEvc ++ nextEvcGenerated, time = time evc + 1 }
+  let nextParticles = nextEvc ++ nextEvcGenerated
+  if null nextParticles then MaybeT $ return Nothing
+  else MaybeT $ runGraph graph ic $ EvContext { particles = nextEvc ++ nextEvcGenerated, time = time evc + 1 }
 
 factoryNextEvc :: Graph gr => gr Intermediate EdgeIndex -> EvContext -> IO (Maybe [EvParticle])
 factoryNextEvc graph evc = runMaybeT $ loop (particles evc) [] where
@@ -133,43 +135,71 @@ handleOutOpGen :: OutOp -> [HalfParticle]
 handleOutOpGen (OutAppend xs) = xs
 handleOutOpGen OutNoOp = []
 
-factoryValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> [HalfParticle] -> Int -> IO (Maybe (InOp, OutOp))
-factoryValue _ (IVar "+") inParticles maxIn outParticles _ = do
+type FactoryValue = [HalfParticle] -> Int -> [HalfParticle] -> Int -> IO (Maybe (InOp, OutOp))
+
+arithFoldL2FactoryValue :: (Int -> Int -> Int) -> Int -> FactoryValue
+arithFoldL2FactoryValue f z inParticles maxIn outParticles _ = do
   if not (null outParticles) || length inParticles < maxIn
   then return $ Just (InNoOp, OutNoOp)
-  else return $ Just (InFlush, OutAppend [("result", VInt (sum $ map (\(_, VInt x) -> x) inParticles))])
-factoryValue _ (IVar "output") [(_, v)] _ _ _ = do
+  else return $ Just (InFlush, OutAppend [("result", VInt (foldl (\a (_, VInt x) -> f a x) z inParticles))])
+arith2Ope2FactoryValue :: (Int -> Int -> Int) -> FactoryValue
+arith2Ope2FactoryValue f inParticles maxIn outParticles _ = do
+  if not (null outParticles) || length inParticles < maxIn
+  then return $ Just (InNoOp, OutNoOp)
+  else do
+    let [(_, VInt x), (_, VInt y)] = inParticles
+    return $ Just (InFlush, OutAppend [("result", VInt (f x y))])
+
+factoryValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> [HalfParticle] -> Int -> IO (Maybe (InOp, OutOp))
+factoryValue _ (IVar "+") = arithFoldL2FactoryValue (+) 0
+factoryValue _ (IVar "-") = arithFoldL2FactoryValue (-) 0
+factoryValue _ (IVar "*") = arithFoldL2FactoryValue (*) 1
+factoryValue _ (IVar "/") = arith2Ope2FactoryValue div
+factoryValue _ (IVar "==") = arith2Ope2FactoryValue (\a b -> if a == b then 1 else 0)
+factoryValue _ (IVar "output") = \[(_, v)] _ _ _ -> do
   doOutput v
   return $ Just (InFlush, OutNoOp)
-factoryValue _ (IVar "trace") inParticles _ outParticles _ = do
+factoryValue _ (IVar "trace") = \inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else do
     let [(_, v)] = inParticles
     doOutput v
     return $ Just (InFlush, OutAppend [("result", v)])
-factoryValue _ (IVar "merge") inParticles _ outParticles _ = do
+factoryValue _ (IVar "merge") = \inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else do
     let (inName, v):rest = inParticles
     return $ Just (InRemove inName, OutAppend [("result", v)])
-factoryValue _ (IVar "if") inParticles@[(_, v)] _ outParticles _ = do
+factoryValue _ (IVar "copy") = \inParticles@[(_, v)] _ outParticles maxOuts -> do
+  if not $ null outParticles
+  then return $ Just (InNoOp, OutNoOp)
+  else do
+    trace (show (map (\i -> ("copy" ++ show i, v)) [0..maxOuts - 1])) return ()
+    return $ Just (InFlush, OutAppend $ map (\i -> ("copy" ++ show i, v)) [0..maxOuts - 1])
+factoryValue _ (IVar "if") = \inParticles@[(_, v)] _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else do
     case v of
       VInt 0 -> return $ Just (InFlush, OutAppend [("else", v)])
       _      -> return $ Just (InFlush, OutAppend [("then", v)])
-factoryValue _ (INum i GMPassive) inParticles _ outParticles _ = do
+factoryValue _ (IVar "control") = \inParticles@[(_, v)] _ outParticles maxOuts -> do
+  if not $ null outParticles
+  then return $ Just (InNoOp, OutNoOp)
+  else return $ Just (InFlush, OutAppend $ map (\i -> ("copy" ++ show i, v)) [0..maxOuts - 1])
+factoryValue _ (INum i GMPassive) = \inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else return $ Just (InFlush, OutAppend [("result", VInt i)])
-factoryValue _ (IRef _) inParticles@[(_, v)] _ outParticles maxOuts = do
-  if not $ null outParticles
+factoryValue _ (IRef _) = \inParticles _ outParticles _ -> do
+  if not $ null outParticles || length inParticles /= 2
   then return $ Just (InNoOp, OutNoOp)
-  else return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1])
-factoryValue _ v _ _ _ _ = trace (show v) return Nothing
+  else do
+    let (Just (_, v)) = find (\(name, _) -> name == "value") inParticles
+    return $ Just (InFlush, OutAppend [("result", v)])
+factoryValue _ v = \_ _ _ _ -> trace (show v) return Nothing
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)
 factoryGenValue _ (INum i GMAlways) outParticles _ = do
