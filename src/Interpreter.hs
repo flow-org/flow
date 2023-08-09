@@ -190,17 +190,19 @@ factoryValue _ (IVar "control") = \inParticles _ outParticles _ -> do
   if not $ null outParticles || length inParticles /= 2
   then return $ Just (InNoOp, OutNoOp)
   else do
-    case find (\(name, _) -> name == "value") inParticles of
-      Just (_, v) -> return $ Just (InFlush, OutAppend [("result", v)])
-      Nothing -> return $ Just (InNoOp, OutNoOp)
+    case (find (\(name, _) -> name == "value") inParticles, find (\(name, _) -> name == "en") inParticles) of
+      (Just (_, v), Just _) -> return $ Just (InFlush, OutAppend [("result", v)])
+      _ -> return $ Just (InNoOp, OutNoOp)
 factoryValue _ (INum i GMPassive) = \inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
   else return $ Just (InFlush, OutAppend [("result", VInt i)])
-factoryValue _ (IRef _) = \inParticles@[(_, v)] _ outParticles maxOuts -> do
+factoryValue _ (IRef name) = \inParticles@[(_, v)] _ outParticles maxOuts -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp)
-  else return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1])
+  else do
+    trace ("ref passed: " ++ name) return ()
+    return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1])
 factoryValue _ v = \_ _ _ _ -> trace (show v) return Nothing
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)
