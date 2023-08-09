@@ -1,192 +1,134 @@
 {-# LANGUAGE RankNTypes #-}
 module Parser where
 
-import Node
-import BaseParser
-import Control.Monad.State
-import PipelineProcessor (processPipeline)
-import Debug.Trace (trace)
--- import ApplyBaseParser (modifyApplyBase, modifyApplyBaseForStatements)
+import Syntax
+import PEGParser
+import Control.Monad.State (evalStateT)
+import Control.Monad.Trans.State (StateT, get)
+import Debug.Trace
 
--- texts which cannot be used for symbols
-reserved = ["<(", ")>", "=", "<->", "<-", "|", "->", "$", "{", "}"]
+allowedLetter :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
+allowedLetter =
+      letter
+  <|> digit
+  <|> char '+'
+  <|> char '*'
+  <|> char '/'
+  <|> char '-'
+  <|> (char '=' >> char '=' >> return "==")
 
-commentTest = do
-  char '#'
-  many $ charNot $ char '\n'
-  return []
-lineTest = commentTest <|> do
-  exp <- statementTest
-  many blankTest
-  optional commentTest
-  return [exp]
-blankTest = char ' ' <|> char '\t'
-breakLineTest = char '\n'
-fileTest = do
-  many $ breakLineTest <|> blankTest
-  head <- lineTest
-  many blankTest
-  tail <- many $ do
-    oneOrMore breakLineTest
-    (do
-      exp <- lineTest
-      many blankTest
-      return exp) <|> (do
-        oneOrMore blankTest
-        return [])
-  breakLineTest
-  char '$'
-  return $ head ++ tail
-statementTest = useMemo "statement" $ defTest <|> pipelineTest
-stringTest = useMemo "string" $ do
-  char '"'
-  text <- many $ (do
-    char '\\'
-    anyChar) <|> charNot (char '\\' <|> char '"' <|> char '\n')
-  char '"'
-  return $ Value $ String text
-numberTest = useMemo "number" $ do
-  text <- oneOrMore digit
-  return $ Value $ Number (read text :: Int)
-booleanTest = useMemo "boolean" $ (do
-  string "true"
-  return $ Value $ Boolean True) <|> do
-    string "false"
-    return $ Value $ Boolean False
-symbolTest = useMemo "symbol" $ do
-  text <- oneOrMore $ charNot $ char ' ' <|> char '\n' <|> char '(' <|> char ')'
-  when (text `elem` reserved) returnFail
-  return $ Value $ Symbol text
-refTest = useMemo "ref" $ do
+-- var = EVar <$> ((++) <$> (return <$> letter) <*> many (letter <|> digit))
+var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+var = useMemo "var" $ EVar <$> many1 allowedLetter
+
+genMode :: StateT (ParseState Char u n) (Either (Memos Char n)) GenMode
+genMode = (char '!' >> return GMOnce) <|> (char '*' >> return GMAlways) <|> return GMPassive
+
+number :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+number = useMemo "number" $ do
+  x <- many1 digit
+  gm <- genMode
+  return $ ENum (read x) gm
+
+ref :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+ref = useMemo "ref" $ do
   char '@'
-  symbol <- symbolTest
-  case symbol of
-    Value (Symbol name) -> return $ Value $ Ref $ GeneralRef name
-additionalParamTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
-additionalParamTest = useMemo "additionalParam" $ (do
+  x <- many1 (letter <|> digit)
+  return $ ERef x
+address :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+
+address = useMemo "address" $ do
+  char '#'
+  x <- many1 (letter <|> digit)
+  return $ EAddress x
+
+primitive :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+primitive = ref <|> address <|> number <|> var
+
+middle :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+middle = useMemo "middle" (EMiddle <$> primitive) >>= (\head -> manySpaces >> (head :) <$> out)
+
+arrow :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
+arrow = char '-' >> char '>'
+arrowLabelLeft = (do
+  x <- many1 (letter <|> digit)
+  char ':'
+  return $ Just x) <|> return Nothing
+arrowLabelRight = (do
+  char ':'
+  x <- many1 (letter <|> digit)
+  return $ Just x) <|> return Nothing
+
+inn :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
+inn = (useMemo "inn" (do
   char '('
-  many blankTest
-  paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
-  oneOrMore blankTest
-  pipeline <- pipelineTest
-  let (Pipeline nodes) = pipeline
-  many blankTest
+  manySpaces
+  seq <- entry
+  ps <- get
+  -- many1Spaces
+  label1 <- arrowLabelLeft
+  arrow
+  label2 <- arrowLabelRight
+  manySpaces
   char ')'
-  return $ AdditionalParam nodes paramType R False) <|> (do
+  return $ EIn seq label1 label2) >>= (\head -> manySpaces >> (head :) <$> inn)) <|> middle
+
+out :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+out = (useMemo "out" (inner <|> do
     char '('
-    many blankTest
-    pipeline <- pipelineTest
-    let (Pipeline nodes) = pipeline
-    oneOrMore blankTest
-    -- <- and -> are not exp.
-    paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
-    many blankTest
+    manySpaces
+    x <- inner
+    manySpaces
     char ')'
-    return $ AdditionalParam nodes paramType L False)
-parensTest = useMemo "parens" $ do
+    return x) >>= (\head -> manySpaces >> (head :) <$> out)) <|> bi <|> return []
+  where
+    inner = do
+      label1 <- arrowLabelLeft
+      arrow
+      label2 <- arrowLabelRight
+      many1Spaces
+      seq <- entry
+      return $ EOut seq label1 label2
+
+bi :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+bi = useMemo "bi" (do
   char '('
-  many blankTest
-  exp <- expTest
-  many blankTest
+  manySpaces
+  label1 <- arrowLabelLeft
+  arrow
+  label2 <- arrowLabelRight
+  many1Spaces
+  seq <- entry
+  test <- psRest <$> get
+  -- many1Spaces
+  label3 <- arrowLabelLeft
+  arrow
+  label4 <- arrowLabelRight
+  manySpaces
   char ')'
-  return exp
-valueTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
-valueTest = useMemo "value" $
-  stringTest <|>
-  numberTest <|>
-  booleanTest <|>
-  refTest <|>
-  symbolTest <|>
-  parensTest
-applyBaseTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
-applyBaseTest = useMemo "applyBase" $ do
-  head <- valueTest
-  tail <- manyOnes $ do
-    oneOrMore blankTest
-    valueTest <|> additionalParamTest
-  return $ ApplyBase $ head:tail
-machineTest = useMemo "machine" $ do
-  string "machine"
-  params <- manyOnes $ do
-    oneOrMore blankTest
-    machineParamTest
-  (do many blankTest; char '\n') <|> oneOrMore blankTest
-  many blankTest
-  char '{'
-  many blankTest
-  head <- pipelineTest
-  tail <- manyOnes $ do
-    many blankTest
-    char '\n'
-    many blankTest
-    pipelineTest
-  many blankTest
-  char '}'
-  return $ Machine params (head:tail)
-  -- todo
-machineParamTest :: StateT (ParseState Char u) (Either (Memos Char)) Node
-machineParamTest = useMemo "machineParam" $ do
-  char '('
-  paramType <- (do string "<-"; return In) <|> (do string "->"; return Out)
-  params <- manyOnes $ do
-    oneOrMore blankTest
-    refTest <|> symbolTest
-  char ')'
-  return $ MachineParam paramType params
-expTest = useMemo "exp" $ machineTest <|> applyBaseTest <|> valueTest
+  return $ EBi seq label1 label2 label3 label4) >>= (\head -> manySpaces >> (head :) <$> (bi <|> inn))
 
-pipelineTest = useMemo "pipeline" $ do
-  head <- expTest
-  tail <- many $ do
-    oneOrMore blankTest
-    connection <- (Bind <$> (do
-      string "<-"
-      return $ Direction R2L) <|> (do
-        string "<->"
-        return Bi) <|> (do
-          string "->"
-          return $ Direction L2R)) <|> bypassTest
-    oneOrMore blankTest
-    exp <- expTest
-    return [connection, exp]
-  return $ Pipeline $ head:tail
+entry :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
+entry = inn
 
-bypassTest :: StateT (ParseState Char t) (Either (Memos Char)) Node
-bypassTest = useMemo "bypass" $ do
-  string "<("
-  oneOrMore blankTest
-  r2l <- pipelineTest
-  oneOrMore blankTest
-  string "|"
-  oneOrMore blankTest
-  l2r <- pipelineTest
-  oneOrMore blankTest
-  string ")>"
-  return $ Bypass r2l l2r
+parseCommand = (do
+  string "run"
+  many1Spaces
+  exps <- entry
+  return $ CImRun exps)
+  <|> (string "run" >> return CRun)
+  <|> (string "exit" >> return CExit)
+  <|> (do
+    string "load"
+    many1Spaces
+    rest <- psRest <$> get
+    return $ CLoad rest)
+  <|> (CDecl <$> entry)
 
-defTest = useMemo "def" $ do
-  connector <- symbolTest
-  oneOrMore blankTest
-  string "="
-  oneOrMore blankTest
-  Def connector <$> pipelineTest
+parseExp text = case evalStateT entry (ParseState 0 initMemos text ()) of
+  Left _ -> Left "parse error"
+  Right e -> Right e
 
-parseFile file = evalStateT fileTest (0, initMemos, file, ())
-parse_ file = case parseFile (file ++ "\n$") of
-  Right nodes -> Right nodes
-  _ -> Left initMemos
-parse file = case parseFile (file ++ "\n$") of
-  Right [Pipeline nodes] -> Right $ runStateT (processPipeline nodes) 0
-  _ -> Left initMemos
-
--- type Equal a b = forall p. (p a -> p b, p b -> p a)
--- refl :: Equal a a
--- refl = (id, id)
--- symm :: Equal a b -> Equal b a
--- symm (x, y) = (y, x)
--- newtype Pack a = Pack { unpack :: a }
--- apply :: Equal a b -> a -> b
--- apply (s, t) = unpack . s . Pack
--- newtype Lift f a b = Lift { unlift :: Equal (f a) (f b) }
--- lift :: Equal a b -> Equal (f a) (f b)
--- lift (s, t) = (unlift (s (Lift refl)), unlift (t, (Lift refl)))
+parse text = case evalStateT parseCommand (ParseState 0 initMemos text ()) of
+  Left _ -> Left "parse error"
+  Right e -> Right e
