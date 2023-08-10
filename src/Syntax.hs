@@ -5,7 +5,11 @@ data Arrow =
     AToLeft  ArrowMode (Maybe String) (Maybe String)
   | AToRight ArrowMode (Maybe String) (Maybe String) deriving Show
 data GenMode = GMAlways | GMOnce | GMPassive deriving (Show, Eq)
-data Value = VNum Int | VString String deriving (Show, Eq)
+data Value = VNum Int | VString String deriving Eq
+instance Show Value where
+  show (VNum i) = show i
+  show (VString s) = s
+
 data Exp =
     EMiddle { exPrim :: Exp }
   | EIn { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
