@@ -10,7 +10,7 @@ import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, modifySTRef, readSTRef, writeSTRef)
 import Data.Foldable (find)
 -- data IGraph a = INode { label :: a, value :: Intermediate, adjacent :: [IGraph a] } deriving Show
-data Intermediate = IVar String | INum Int GenMode | IRef String | IAddress String deriving Show
+data Intermediate = IVar String | IImm Value GenMode | IRef String | IAddress String deriving Show
 type NodeId = Int
 type EdgeIndex = (String, String)
 data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
@@ -148,20 +148,20 @@ handlePrimitive (EVar varName) externalIns = do
   appendNode (IVar varName)
   nextCounter
   return $ map (\outName -> IInNode counter outName Nothing) outNames
-handlePrimitive (ENum i GMPassive) externalIns = do
+handlePrimitive (EImm i GMPassive) externalIns = do
   let edges = matchInsWithInNodes ["a"] externalIns
   counter <- next <$> get
   forM_ edges (\(nid, edgeIndex) -> do
     is <- get
     let newNodes = appendEdge nid edgeIndex counter (currentNodes is)
     modify (\is -> is { currentNodes = newNodes }))
-  appendNode (INum i GMPassive)
+  appendNode (IImm i GMPassive)
   nextCounter
   return [IInNode counter "result" Nothing]
-handlePrimitive (ENum i gm) externalIns = do
+handlePrimitive (EImm i gm) externalIns = do
   counter <- next <$> get
   modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
-  appendNode (INum i gm)
+  appendNode (IImm i gm)
   nextCounter
   return [IInNode counter "result" Nothing]
 handlePrimitive (ERef ref) externalIns = do

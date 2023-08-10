@@ -12,8 +12,6 @@ import Data.List (find)
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
 import Debug.Trace
 
-data Value = VInt Int deriving Show
-
 data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
 type HalfParticle = (String, Value)
 newtype EvNodeState = EvNSControl Value deriving Show
@@ -150,14 +148,14 @@ arithFoldL2FactoryValue :: (Int -> Int -> Int) -> Int -> FactoryValue
 arithFoldL2FactoryValue f z inParticles maxIn outParticles _ = do
   if not (null outParticles) || length inParticles < maxIn
   then return $ Just (InNoOp, OutNoOp, Nothing)
-  else return $ Just (InFlush, OutAppend [("result", VInt (foldl (\a (_, VInt x) -> f a x) z inParticles))], Nothing)
+  else return $ Just (InFlush, OutAppend [("result", VNum (foldl (\a (_, VNum x) -> f a x) z inParticles))], Nothing)
 arith2Ope2FactoryValue :: (Int -> Int -> Int) -> FactoryValue
 arith2Ope2FactoryValue f inParticles maxIn outParticles _ = do
   if not (null outParticles) || length inParticles < maxIn
   then return $ Just (InNoOp, OutNoOp, Nothing)
   else do
-    let [(_, VInt x), (_, VInt y)] = inParticles
-    return $ Just (InFlush, OutAppend [("result", VInt (f x y))], Nothing)
+    let [(_, VNum x), (_, VNum y)] = inParticles
+    return $ Just (InFlush, OutAppend [("result", VNum (f x y))], Nothing)
 
 factoryValue :: Maybe EvNodeState -> Intermediate -> FactoryValue
 factoryValue _ (IVar "+") = arithFoldL2FactoryValue (+) 0
@@ -191,7 +189,7 @@ factoryValue _ (IVar "if") = \inParticles@[(_, v)] _ outParticles _ -> do
   then return $ Just (InNoOp, OutNoOp, Nothing)
   else do
     case v of
-      VInt 0 -> return $ Just (InFlush, OutAppend [("else", v)], Nothing)
+      VNum 0 -> return $ Just (InFlush, OutAppend [("else", v)], Nothing)
       _      -> return $ Just (InFlush, OutAppend [("then", v)], Nothing)
 factoryValue ns (IVar "control") = \inParticles _ outParticles _ -> do
   if not $ null outParticles
@@ -205,10 +203,10 @@ factoryValue ns (IVar "control") = \inParticles _ outParticles _ -> do
     case (newNs, en) of
       (Just (EvNSControl v), Just _) -> return $ Just (InFlush, OutAppend [("result", v)], Nothing)
       _ -> return $ Just (InRemove "value", OutNoOp, newNs)
-factoryValue _ (INum i GMPassive) = \inParticles _ outParticles _ -> do
+factoryValue _ (IImm v GMPassive) = \inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp, Nothing)
-  else return $ Just (InFlush, OutAppend [("result", VInt i)], Nothing)
+  else return $ Just (InFlush, OutAppend [("result", v)], Nothing)
 factoryValue _ (IRef name) = \inParticles@[(_, v)] _ outParticles maxOuts -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp, Nothing)
@@ -218,11 +216,11 @@ factoryValue _ (IRef name) = \inParticles@[(_, v)] _ outParticles maxOuts -> do
 factoryValue _ v = \_ _ _ _ -> trace (show v) return Nothing
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)
-factoryGenValue _ (INum i GMAlways) outParticles _ = do
+factoryGenValue _ (IImm v GMAlways) outParticles _ = do
   if not $ null outParticles
   then return $ Just OutNoOp
-  else return $ Just $ OutAppend [("result", VInt i)]
-factoryGenValue evc (INum i GMOnce) outParticles _ =
+  else return $ Just $ OutAppend [("result", v)]
+factoryGenValue evc (IImm v GMOnce) outParticles _ =
   if not (null outParticles) || time evc > 0
   then return $ Just OutNoOp
-  else return $ Just $ OutAppend [("result", VInt i)]
+  else return $ Just $ OutAppend [("result", v)]

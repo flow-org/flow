@@ -28,7 +28,17 @@ number :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 number = useMemo "number" $ do
   x <- many1 digit
   gm <- genMode
-  return $ ENum (read x) gm
+  return $ EImm (VNum (read x)) gm
+
+str = useMemo "string" $ do
+  char '"'
+  x <- many ((do
+    char '\\'
+    c <- anyChar
+    return ('\\' : c)) <|> charNot (char '\n' <|> char '\"'))
+  char '"'
+  gm <- genMode
+  return $ EImm (VString (read ("\"" ++ x ++ "\""))) gm -- by using `read`, we can unescape the text
 
 ref :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 ref = useMemo "ref" $ do
@@ -43,7 +53,7 @@ address = useMemo "address" $ do
   return $ EAddress x
 
 primitive :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
-primitive = ref <|> address <|> number <|> var
+primitive = ref <|> address <|> number <|> str <|> var
 
 middle :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
 middle = useMemo "middle" (EMiddle <$> primitive) >>= (\head -> manySpaces >> (head :) <$> out)
