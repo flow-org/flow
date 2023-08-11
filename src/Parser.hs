@@ -1,7 +1,7 @@
 {-# LANGUAGE RankNTypes #-}
 module Parser where
 
-import Syntax
+import Types
 import PEGParser
 import Control.Monad.State (evalStateT)
 import Control.Monad.Trans.State (StateT, get)
@@ -11,11 +11,12 @@ allowedLetter :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
 allowedLetter =
       letter
   <|> digit
+  <|> (char '=' >> char '=' >> return "==")
+  <|> (char '+' >> char '+' >> return "++")
   <|> char '+'
   <|> char '*'
   <|> char '/'
   <|> char '-'
-  <|> (char '=' >> char '=' >> return "==")
 
 -- var = EVar <$> ((++) <$> (return <$> letter) <*> many (letter <|> digit))
 var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp

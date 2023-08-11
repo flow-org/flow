@@ -1,9 +1,9 @@
 module Main where
 
 import Parser
-import Syntax
+import Types
 import Intermediate
-import Interpreter (runGraph, toGraph, EvContext (EvContext))
+import Interpreter (runGraph, toGraph)
 
 import Debug.Trace
 

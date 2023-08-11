@@ -22,14 +22,16 @@ maintainer:         shundroid@users.noreply.github.com
 extra-source-files: CHANGELOG.md
 
 library
-    exposed-modules:  MyLib
+    -- exposed-modules:  MyLib
 
     -- Modules included in this library but not exported.
     other-modules:
         Intermediate
+        Interpreter
         Parser
-        Syntax,
         PEGParser
+        Primitives
+        Types
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

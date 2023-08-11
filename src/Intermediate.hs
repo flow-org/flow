@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 module Intermediate where
-import Control.Monad.State (StateT, MonadTrans (lift), execState, execStateT, forM_)
-import Syntax
+import Control.Monad.State (StateT, MonadTrans (lift), execState, execStateT, forM_, unless)
+import Types
 import Control.Monad.State.Class (modify, get, put)
 import qualified Data.Map.Strict as Map
 import Debug.Trace (trace)
@@ -9,55 +9,8 @@ import Control.Monad (forM)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, modifySTRef, readSTRef, writeSTRef)
 import Data.Foldable (find)
--- data IGraph a = INode { label :: a, value :: Intermediate, adjacent :: [IGraph a] } deriving Show
-data Intermediate = IVar String | IImm Value GenMode | IRef String | IAddress String deriving Show
-type NodeId = Int
-type EdgeIndex = (String, String)
-data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
-data IRefState = IRefState { refNodeId :: NodeId, usedCount :: Int, consumed :: Bool } deriving Show
-data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
-data IAvailable = IAvailable { aNodeId :: NodeId, outName :: String, seekingInName :: Maybe String } deriving Show
-
--- new
-data IInNode = IInNode { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
-
-data IState = IState {
-  -- maybe old
-  currentNodes :: Map.Map NodeId INode,
-  available :: [IAvailable],
-  refs :: Map.Map String IRefState,
-  next :: NodeId,
-  consumeLabelStack :: [String],
-  context :: IContext
-} deriving Show
-
-requiredInputs :: String -> [String]
-requiredInputs "+" = ["a", "b"]
-requiredInputs "-" = ["a", "b"]
-requiredInputs "*" = ["a", "b"]
-requiredInputs "/" = ["a", "b"]
-requiredInputs "==" = ["a", "b"]
-requiredInputs "input" = []
-requiredInputs "output" = ["a"]
-requiredInputs "trace" = ["a"]
-requiredInputs "merge" = ["a", "b"] -- todo
-requiredInputs "copy" = ["a"] -- todo
-requiredInputs "if" = ["condition"]
-requiredInputs "control" = ["en", "value"]
-
-requiredOutputs :: String -> [String]
-requiredOutputs "+" = ["result"]
-requiredOutputs "-" = ["result"]
-requiredOutputs "*" = ["result"]
-requiredOutputs "/" = ["result"]
-requiredOutputs "==" = ["result"]
-requiredOutputs "input" = ["result"]
-requiredOutputs "output" = []
-requiredOutputs "trace" = ["result"]
-requiredOutputs "merge" = ["result"]
-requiredOutputs "copy" = ["copy0", "copy1"]
-requiredOutputs "if" = ["then", "else"]
-requiredOutputs "control" = ["result"]
+import Primitives
+import Data.Maybe (isJust)
 
 appendEdge :: NodeId -> EdgeIndex -> NodeId -> Map.Map NodeId INode -> Map.Map NodeId INode
 appendEdge nid eidx nidTo = Map.alter inner nid where
@@ -138,7 +91,10 @@ handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
 
 handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
 handlePrimitive (EVar varName) externalIns = do
-  let (inNames, outNames) = (requiredInputs varName, requiredOutputs varName)
+  let prim = getPrimitive varName
+  unless (isJust prim) $ lift $ Left (varName ++ " is not found")
+  let (Just p) = prim
+  let (inNames, outNames) = (pInns p, pOuts p)
   let edges = matchInsWithInNodes inNames externalIns
   counter <- next <$> get
   forM_ edges (\(nid, edgeIndex) -> do

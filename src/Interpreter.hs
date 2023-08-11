@@ -3,7 +3,7 @@ module Interpreter where
 import qualified Data.Map.Strict as Map
 import Intermediate
 import Data.Graph.Inductive (LEdge, LNode, Graph (mkGraph, empty), Gr, inn, lab, out)
-import Syntax
+import Types
 import Control.Monad.State (StateT, MonadTrans (lift), MonadState (put, get), forM_)
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, readSTRef)
@@ -11,12 +11,8 @@ import Data.Maybe (isJust, mapMaybe)
 import Data.List (find)
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
 import Debug.Trace
+import Primitives
 
-data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
-type HalfParticle = (String, Value)
-newtype EvNodeState = EvNSControl Value deriving Show
-data EvContext = EvContext { particles :: [EvParticle], time :: Int, nodeStates :: Map.Map NodeId EvNodeState } deriving Show
-data EvState = EvState { graph :: Gr Intermediate EdgeIndex, ic :: IContext, evc :: EvContext }
 
 emptyEvContext :: EvContext
 emptyEvContext = EvContext [] 0 Map.empty
@@ -111,23 +107,12 @@ factoryByNid graph evc nid = do
   let (inParticles, outParticles, inns, outs) = getInOutHalfParticles graph evc nid
   let (Just intermediate) = lab graph nid
   let ns = Map.lookup nid $ nodeStates evc
-  (inOp, outOp, newNs) <- MaybeT $ factoryValue ns intermediate inParticles (length inns) outParticles (length outs)
+  (inOp, outOp, newNs) <- MaybeT $ factoryValue intermediate ns inParticles (length inns) outParticles (length outs)
   let newInParticles = handleInOp inOp inParticles
   let newOutParticles = handleOutOpGen outOp
   let newInFullParticles = toFullInParticles inns newInParticles
   let newOutFullParticles = toFullOutParticles outs newOutParticles
   return (newInFullParticles, newOutFullParticles, newNs)
-
-doOutput v = do
-  putStr $ show v
-  c <- getChar
-  putStrLn ""
-  if c == ';'
-    then return $ Just ()
-    else return Nothing
-
-data InOp = InFlush | InRemove String | InNoOp deriving Show
-data OutOp = OutAppend [HalfParticle] | OutNoOp deriving Show
 
 handleInOp :: InOp -> [HalfParticle] -> [HalfParticle]
 handleInOp InFlush _ = []
@@ -142,78 +127,21 @@ handleOutOpGen :: OutOp -> [HalfParticle]
 handleOutOpGen (OutAppend xs) = xs
 handleOutOpGen OutNoOp = []
 
-type FactoryValue = [HalfParticle] -> Int -> [HalfParticle] -> Int -> IO (Maybe (InOp, OutOp, Maybe EvNodeState))
-
-arithFoldL2FactoryValue :: (Int -> Int -> Int) -> Int -> FactoryValue
-arithFoldL2FactoryValue f z inParticles maxIn outParticles _ = do
-  if not (null outParticles) || length inParticles < maxIn
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else return $ Just (InFlush, OutAppend [("result", VNum (foldl (\a (_, VNum x) -> f a x) z inParticles))], Nothing)
-arith2Ope2FactoryValue :: (Int -> Int -> Int) -> FactoryValue
-arith2Ope2FactoryValue f inParticles maxIn outParticles _ = do
-  if not (null outParticles) || length inParticles < maxIn
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else do
-    let [(_, VNum x), (_, VNum y)] = inParticles
-    return $ Just (InFlush, OutAppend [("result", VNum (f x y))], Nothing)
-
-factoryValue :: Maybe EvNodeState -> Intermediate -> FactoryValue
-factoryValue _ (IVar "+") = arithFoldL2FactoryValue (+) 0
-factoryValue _ (IVar "-") = arithFoldL2FactoryValue (-) 0
-factoryValue _ (IVar "*") = arithFoldL2FactoryValue (*) 1
-factoryValue _ (IVar "/") = arith2Ope2FactoryValue div
-factoryValue _ (IVar "==") = arith2Ope2FactoryValue (\a b -> if a == b then 1 else 0)
-factoryValue _ (IVar "output") = \[(_, v)] _ _ _ -> do
-  doOutput v
-  return $ Just (InFlush, OutNoOp, Nothing)
-factoryValue _ (IVar "trace") = \inParticles _ outParticles _ -> do
-  if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else do
-    let [(_, v)] = inParticles
-    doOutput v
-    return $ Just (InFlush, OutAppend [("result", v)], Nothing)
-factoryValue _ (IVar "merge") = \inParticles _ outParticles _ -> do
-  if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else do
-    let (inName, v):rest = inParticles
-    return $ Just (InRemove inName, OutAppend [("result", v)], Nothing)
-factoryValue _ (IVar "copy") = \inParticles@[(_, v)] _ outParticles maxOuts -> do
-  if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else do
-    return $ Just (InFlush, OutAppend $ map (\i -> ("copy" ++ show i, v)) [0..maxOuts - 1], Nothing)
-factoryValue _ (IVar "if") = \inParticles@[(_, v)] _ outParticles _ -> do
-  if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else do
-    case v of
-      VNum 0 -> return $ Just (InFlush, OutAppend [("else", v)], Nothing)
-      _      -> return $ Just (InFlush, OutAppend [("then", v)], Nothing)
-factoryValue ns (IVar "control") = \inParticles _ outParticles _ -> do
-  if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, ns)
-  else do
-    let v = find (\(name, _) -> name == "value") inParticles
-    let newNs = (case v of
-          Just (_, v) -> Just $ EvNSControl v
-          _ -> ns)
-    let en = find (\(name, _) -> name == "en") inParticles
-    case (newNs, en) of
-      (Just (EvNSControl v), Just _) -> return $ Just (InFlush, OutAppend [("result", v)], Nothing)
-      _ -> return $ Just (InRemove "value", OutNoOp, newNs)
-factoryValue _ (IImm v GMPassive) = \inParticles _ outParticles _ -> do
+factoryValue :: Intermediate -> FactoryValue
+factoryValue (IVar v) = case getPrimitive v of
+  (Just p) -> pEval p
+  _ -> \_ _ _ _ _ -> return Nothing
+factoryValue (IImm v GMPassive) = \_ inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp, Nothing)
   else return $ Just (InFlush, OutAppend [("result", v)], Nothing)
-factoryValue _ (IRef name) = \inParticles@[(_, v)] _ outParticles maxOuts -> do
+factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
   if not $ null outParticles
   then return $ Just (InNoOp, OutNoOp, Nothing)
   else do
     -- trace ("ref passed: " ++ name) return ()
     return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
-factoryValue _ v = \_ _ _ _ -> trace (show v) return Nothing
+factoryValue v = \_ _ _ _ _ -> trace (show v) return Nothing
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)
 factoryGenValue _ (IImm v GMAlways) outParticles _ = do
