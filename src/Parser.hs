@@ -12,7 +12,6 @@ allowedLetter =
       letter
   <|> digit
   <|> (char '=' >> char '=' >> return "==")
-  <|> (char '+' >> char '+' >> return "++")
   <|> char '+'
   <|> char '*'
   <|> char '/'
