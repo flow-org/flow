@@ -2,6 +2,7 @@ module Types where
 
 import qualified Data.Map.Strict as Map
 import Data.Graph.Inductive (Gr)
+import Control.Monad.Trans.Maybe (MaybeT)
 
 data ArrowMode = Normal | Buf | Notify deriving Show
 data Arrow =
@@ -56,4 +57,4 @@ data EvState = EvState { graph :: Gr Intermediate EdgeIndex, ic :: IContext, evc
 data InOp = InFlush | InRemove String | InNoOp deriving Show
 data OutOp = OutAppend [HalfParticle] | OutNoOp deriving Show
 
-type FactoryValue = Maybe EvNodeState -> [HalfParticle] -> Int -> [HalfParticle] -> Int -> IO (Maybe (InOp, OutOp, Maybe EvNodeState))
+type FactoryValue = Maybe EvNodeState -> [HalfParticle] -> Int -> [HalfParticle] -> Int -> MaybeT IO (InOp, OutOp, Maybe EvNodeState)

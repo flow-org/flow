@@ -52,8 +52,8 @@ toFullOutParticles outs hps = mapMaybe (\(_, nextNid, eidx@(outName, _)) -> case
 runGraphLoop :: Graph gr => gr Intermediate EdgeIndex -> IContext -> EvContext -> IO (Maybe ())
 runGraphLoop graph ic evc = runMaybeT $ do
   -- trace (show evc) return ()
-  (nextEvP, nss) <- MaybeT $ factoryNextEvc graph evc
-  nextEvPGenerated <- MaybeT $ factoryNextGenerated graph evc (genNodes ic)
+  (nextEvP, nss) <- factoryNextEvc graph evc
+  nextEvPGenerated <- factoryNextGenerated graph evc (genNodes ic)
   -- lift getChar
   let nextParticles = nextEvP ++ nextEvPGenerated
   -- if null nextParticles then MaybeT $ return Nothing
@@ -62,8 +62,8 @@ runGraphLoop graph ic evc = runMaybeT $ do
 
 runGraph graph ic = runGraphLoop graph ic (EvContext [] 0 Map.empty)
 
-factoryNextEvc :: Graph gr => gr Intermediate EdgeIndex -> EvContext -> IO (Maybe ([EvParticle], Map.Map NodeId EvNodeState))
-factoryNextEvc graph evc = runMaybeT $ loop (particles evc) [] where
+factoryNextEvc :: Graph gr => gr Intermediate EdgeIndex -> EvContext -> MaybeT IO ([EvParticle], Map.Map NodeId EvNodeState)
+factoryNextEvc graph evc = loop (particles evc) [] where
     loop [] _ = return ([], nodeStates evc)
     loop particles@(EvParticle nid eidx v : rest) muteList = do
       if nid `elem` muteList
@@ -76,14 +76,14 @@ factoryNextEvc graph evc = runMaybeT $ loop (particles evc) [] where
                 Nothing -> nss)
           return (newInFullParticles ++ newOutFullParticles ++ particles, newNss)
 
-factoryNextGenerated :: Graph gr => gr Intermediate EdgeIndex -> EvContext -> [Int] -> IO (Maybe [EvParticle])
-factoryNextGenerated graph evc genNodes = runMaybeT $ loop genNodes where
+factoryNextGenerated :: Graph gr => gr Intermediate EdgeIndex -> EvContext -> [Int] -> MaybeT IO [EvParticle]
+factoryNextGenerated graph evc genNodes = loop genNodes where
   loop :: [Int] -> MaybeT IO [EvParticle]
   loop [] = return []
   loop (nid : rest) = do
     let (_, outParticles, _, outs) = getInOutHalfParticles graph evc nid
     let (Just intermediate) = lab graph nid
-    outOp <- MaybeT $ factoryGenValue evc intermediate outParticles (length outs)
+    outOp <- factoryGenValue evc intermediate outParticles (length outs)
     let newOutFullParticles = toFullOutParticles outs (handleOutOpGen outOp)
     (newOutFullParticles ++) <$> loop rest
 
@@ -108,7 +108,7 @@ factoryByNid graph evc nid = do
   let (inParticles, outParticles, inns, outs) = getInOutHalfParticles graph evc nid
   let (Just intermediate) = lab graph nid
   let ns = Map.lookup nid $ nodeStates evc
-  (inOp, outOp, newNs) <- MaybeT $ factoryValue intermediate ns inParticles (length inns) outParticles (length outs)
+  (inOp, outOp, newNs) <- factoryValue intermediate ns inParticles (length inns) outParticles (length outs)
   let newInParticles = handleInOp inOp inParticles
   let newOutParticles = handleOutOpGen outOp
   let newInFullParticles = toFullInParticles inns newInParticles
@@ -131,25 +131,25 @@ handleOutOpGen OutNoOp = []
 factoryValue :: Intermediate -> FactoryValue
 factoryValue (IVar v) = case getPrimitive v of
   (Just p) -> pEval p
-  _ -> \_ _ _ _ _ -> return Nothing
+  _ -> \_ _ _ _ _ -> MaybeT $ return Nothing
 factoryValue (IImm v GMPassive) = \_ inParticles _ outParticles _ -> do
   if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
-  else return $ Just (InFlush, OutAppend [("result", v)], Nothing)
+  then return (InNoOp, OutNoOp, Nothing)
+  else return (InFlush, OutAppend [("result", v)], Nothing)
 factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
   if not $ null outParticles
-  then return $ Just (InNoOp, OutNoOp, Nothing)
+  then return (InNoOp, OutNoOp, Nothing)
   else do
     -- trace ("ref passed: " ++ name) return ()
-    return $ Just (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
-factoryValue v = \_ _ _ _ _ -> trace (show v) return Nothing
+    return (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
+factoryValue v = \_ _ _ _ _ -> trace (show v) MaybeT $ return Nothing
 
-factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> IO (Maybe OutOp)
+factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> MaybeT IO OutOp
 factoryGenValue _ (IImm v GMAlways) outParticles _ = do
   if not $ null outParticles
-  then return $ Just OutNoOp
-  else return $ Just $ OutAppend [("result", v)]
+  then return OutNoOp
+  else return $ OutAppend [("result", v)]
 factoryGenValue evc (IImm v GMOnce) outParticles _ =
   if not (null outParticles) || time evc > 0
-  then return $ Just OutNoOp
-  else return $ Just $ OutAppend [("result", v)]
+  then return OutNoOp
+  else return $ OutAppend [("result", v)]
