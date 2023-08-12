@@ -37,7 +37,7 @@ doOutput v = do
 primitives :: Map.Map String Primitive
 primitives = Map.fromList [
     ("+", Primitive ["a", "b"] ["result"] $ arithFoldL2FactoryValue (+) 0),
-    ("-", Primitive ["a", "b"] ["result"] $ arithFoldL2FactoryValue (-) 0),
+    ("-", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue (-)),
     ("*", Primitive ["a", "b"] ["result"] $ arithFoldL2FactoryValue (*) 1),
     ("/", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue div),
     ("==", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue (\a b -> if a == b then 1 else 0)),
