@@ -17,7 +17,6 @@ allowedLetter =
   <|> char '/'
   <|> char '-'
 
--- var = EVar <$> ((++) <$> (return <$> letter) <*> many (letter <|> digit))
 var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 var = useMemo "var" $ EVar <$> many1 allowedLetter
 
@@ -58,8 +57,8 @@ primitive = ref <|> address <|> number <|> str <|> var
 middle :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
 middle = useMemo "middle" (EMiddle <$> primitive) >>= (\head -> manySpaces >> (head :) <$> out)
 
-arrow :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
-arrow = char '-' >> char '>'
+arrow :: StateT (ParseState Char u n) (Either (Memos Char n)) ()
+arrow = char '-' >> char '>' >> return ()
 arrowLabelLeft = (do
   x <- many1 (letter <|> digit)
   char ':'

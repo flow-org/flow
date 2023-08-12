@@ -35,18 +35,15 @@ type EdgeIndex = (String, String)
 data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
 data IRefState = IRefState { refNodeId :: NodeId, usedCount :: Int, consumed :: Bool } deriving Show
 data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
-data IAvailable = IAvailable { aNodeId :: NodeId, outName :: String, seekingInName :: Maybe String } deriving Show
 
 -- new
-data IInNode = IInNode { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
+data IAvailable = IAvailable { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
 
 data IState = IState {
   -- maybe old
   currentNodes :: Map.Map NodeId INode,
-  available :: [IAvailable],
   refs :: Map.Map String IRefState,
   next :: NodeId,
-  consumeLabelStack :: [String],
   context :: IContext
 } deriving Show
 

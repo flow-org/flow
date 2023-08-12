@@ -62,14 +62,6 @@ many p = StateT inner where
       Left memos -> Right (x', s' { psMemos = memos })
     Left memos -> Right ([], s { psMemos = memos })
 
-manyOnes :: StateT (ParseState t u n) (Either (Memos t n)) a -> StateT (ParseState t u n) (Either (Memos t n)) [a]
-manyOnes p = StateT inner where
-  inner s = case runStateT p s of
-    Right (x', s') -> case runStateT (manyOnes p) s' of
-      Right (x'', s'') -> Right (x':x'', s'')
-      Left memos -> Right ([x'], s' { psMemos = memos })
-    Left memos -> Right ([], s { psMemos = memos })
-
 many1 p = do
   x <- p
   xs <- many p

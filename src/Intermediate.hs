@@ -24,9 +24,9 @@ nextCounter = modify $ \is -> is { next = next is + 1 }
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
 modifyContext f = modify $ \is -> is { context = f $ context is }
 
-matchOutsWithExpectedOuts :: [Exp] -> [IInNode] -> ([(IInNode, Exp)], [IInNode])
+matchOutsWithExpectedOuts :: [Exp] -> [IAvailable] -> ([(IAvailable, Exp)], [IAvailable])
 matchOutsWithExpectedOuts a b = fst $ inner a b where
-  inner :: [Exp] -> [IInNode] -> (([(IInNode, Exp)], [IInNode]), [Exp])
+  inner :: [Exp] -> [IAvailable] -> (([(IAvailable, Exp)], [IAvailable]), [Exp])
   inner [] inNodes = (([], inNodes), [])
   inner outs [] = (([], []), outs)
   inner outs (inNode:ys) =
@@ -36,7 +36,7 @@ matchOutsWithExpectedOuts a b = fst $ inner a b where
     case b of
       hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
-sortExpectedOuts :: [Exp] -> [IInNode] -> [IInNode]
+sortExpectedOuts :: [Exp] -> [IAvailable] -> [IAvailable]
 sortExpectedOuts exps inNodes =
   let outs = takeWhile (\out -> case out of
             EOut _ _ _ -> True
@@ -45,15 +45,15 @@ sortExpectedOuts exps inNodes =
   let matched = fst $ matchOutsWithExpectedOuts outs inNodes in
   inner matched outs
   where
-    inner :: [(IInNode, Exp)] -> [Exp] -> [IInNode]
+    inner :: [(IAvailable, Exp)] -> [Exp] -> [IAvailable]
     inner _ [] = []
     inner matched (x : xs) =
       let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in
         inNode : inner matched xs
 
-matchInsWithInNodes :: [String] -> [IInNode] -> [(NodeId, EdgeIndex)]
+matchInsWithInNodes :: [String] -> [IAvailable] -> [(NodeId, EdgeIndex)]
 matchInsWithInNodes a b = fst $ inner a b where
-  inner :: [String] -> [IInNode] -> ([(NodeId, EdgeIndex)], [IInNode])
+  inner :: [String] -> [IAvailable] -> ([(NodeId, EdgeIndex)], [IAvailable])
   inner [] rest = ([], rest)
   inner (inn:xs) inNodes =
     let (a, b) = span (\inNode -> Just inn /= expectedToConnectWith inNode) inNodes in
@@ -61,7 +61,7 @@ matchInsWithInNodes a b = fst $ inner a b where
       hit:rest -> let (c, d) = inner xs (a ++ rest) in ((fromNid hit, (fromName hit, inn)) : c, d)
       [] -> let (c, head:tail) = inner xs inNodes in ((fromNid head, (fromName head, inn)) : c, tail)
 
-handle :: [Exp] -> [IInNode] -> [IInNode] -> StateT IState (Either String) (Maybe IInNode)
+handle :: [Exp] -> [IAvailable] -> [IAvailable] -> StateT IState (Either String) (Maybe IAvailable)
 handle e@(EIn seq _ to : rest) ins _ = do
   result <- handle seq [] []
   let (Just last) = result
@@ -89,7 +89,7 @@ handleMultiline :: [[Exp]] -> StateT IState (Either String) ()
 handleMultiline [] = return ()
 handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
 
-handlePrimitive :: Exp -> [IInNode] -> StateT IState (Either String) [IInNode]
+handlePrimitive :: Exp -> [IAvailable] -> StateT IState (Either String) [IAvailable]
 handlePrimitive (EVar varName) externalIns = do
   let prim = getPrimitive varName
   unless (isJust prim) $ lift $ Left (varName ++ " is not found")
@@ -103,7 +103,7 @@ handlePrimitive (EVar varName) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (IVar varName)
   nextCounter
-  return $ map (\outName -> IInNode counter outName Nothing) outNames
+  return $ map (\outName -> IAvailable counter outName Nothing) outNames
 handlePrimitive (EImm i GMPassive) externalIns = do
   let edges = matchInsWithInNodes ["a"] externalIns
   counter <- next <$> get
@@ -113,13 +113,13 @@ handlePrimitive (EImm i GMPassive) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (IImm i GMPassive)
   nextCounter
-  return [IInNode counter "result" Nothing]
+  return [IAvailable counter "result" Nothing]
 handlePrimitive (EImm i gm) externalIns = do
   counter <- next <$> get
   modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
   appendNode (IImm i gm)
   nextCounter
-  return [IInNode counter "result" Nothing]
+  return [IAvailable counter "result" Nothing]
 handlePrimitive (ERef ref) externalIns = do
   is <- get
   let refList = refs is
@@ -139,7 +139,7 @@ handlePrimitive (ERef ref) externalIns = do
             return []
         else do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { usedCount = count + 1 })) ref refList }
-            return [IInNode refnid ("refOut" ++ show count) Nothing]
+            return [IAvailable refnid ("refOut" ++ show count) Nothing]
     Nothing -> do
       appendNode (IRef ref)
       if isConsumer
@@ -155,16 +155,18 @@ handlePrimitive (ERef ref) externalIns = do
         else do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) 1 False) refList }
           counter <- next <$> get
-          let newInNodes = [IInNode counter "refOut0" Nothing]
+          let newInNodes = [IAvailable counter "refOut0" Nothing]
           nextCounter
           return newInNodes
 
+defaultIState = IState Map.empty Map.empty 0 (IContext Map.empty [])
+
 convert :: [Exp] -> Either String (Map.Map Int INode, IContext)
-convert exps = case execStateT (handle exps [] []) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+convert exps = case execStateT (handle exps [] []) defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
 convertMultiline :: [[Exp]] -> Either String (Map.Map Int INode, IContext)
-convertMultiline exps = case execStateT (handleMultiline exps) $ IState Map.empty [] Map.empty 0 [] (IContext Map.empty []) of
+convertMultiline exps = case execStateT (handleMultiline exps) defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
