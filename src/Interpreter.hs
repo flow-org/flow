@@ -4,7 +4,7 @@ import qualified Data.Map.Strict as Map
 import Intermediate
 import Data.Graph.Inductive (LEdge, LNode, Graph (mkGraph, empty), Gr, inn, lab, out)
 import Types
-import Control.Monad.State (StateT, MonadTrans (lift), MonadState (put, get), forM_)
+import Control.Monad.State (StateT, MonadTrans (lift), MonadState (put, get), forM_, MonadPlus (mzero))
 import Control.Monad.ST (runST)
 import Data.STRef (newSTRef, readSTRef)
 import Data.Maybe (isJust, mapMaybe)
@@ -131,7 +131,7 @@ handleOutOpGen OutNoOp = []
 factoryValue :: Intermediate -> FactoryValue
 factoryValue (IVar v) = case getPrimitive v of
   (Just p) -> pEval p
-  _ -> \_ _ _ _ _ -> MaybeT $ return Nothing
+  _ -> \_ _ _ _ _ -> mzero
 factoryValue (IImm v GMPassive) = \_ inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return (InNoOp, OutNoOp, Nothing)
@@ -142,7 +142,7 @@ factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
   else do
     -- trace ("ref passed: " ++ name) return ()
     return (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
-factoryValue v = \_ _ _ _ _ -> trace (show v) MaybeT $ return Nothing
+factoryValue v = \_ _ _ _ _ -> trace (show v) mzero
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> MaybeT IO OutOp
 factoryGenValue _ (IImm v GMAlways) outParticles _ = do

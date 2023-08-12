@@ -4,7 +4,7 @@ import Types
 import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Control.Monad.Trans.Maybe (MaybeT(MaybeT))
-import Control.Monad.Cont (MonadTrans(lift))
+import Control.Monad.Cont (MonadTrans(lift), MonadPlus (mzero), guard)
 
 data Primitive = Primitive {
   pInns :: [String],
@@ -33,9 +33,8 @@ doOutput v = do
   lift $ putStr $ show v
   c <- lift getChar
   lift $ putStrLn ""
-  if c == ';'
-    then return ()
-    else MaybeT $ return Nothing
+  guard (c == ';')
+  return ()
 
 primitives :: Map.Map String Primitive
 primitives = Map.fromList [
