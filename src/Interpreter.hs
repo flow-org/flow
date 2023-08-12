@@ -56,8 +56,9 @@ runGraphLoop graph ic evc = runMaybeT $ do
   nextEvPGenerated <- MaybeT $ factoryNextGenerated graph evc (genNodes ic)
   -- lift getChar
   let nextParticles = nextEvP ++ nextEvPGenerated
-  if null nextParticles then MaybeT $ return Nothing
-  else MaybeT $ runGraphLoop graph ic $ evc { particles = nextEvP ++ nextEvPGenerated, time = time evc + 1, nodeStates = nss }
+  -- if null nextParticles then MaybeT $ return Nothing
+  --else
+  MaybeT $ runGraphLoop graph ic $ evc { particles = nextEvP ++ nextEvPGenerated, time = time evc + 1, nodeStates = nss }
 
 runGraph graph ic = runGraphLoop graph ic (EvContext [] 0 Map.empty)
 
