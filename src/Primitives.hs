@@ -7,8 +7,8 @@ import Control.Monad.Trans.Maybe (MaybeT(MaybeT))
 import Control.Monad.Cont (MonadTrans(lift), MonadPlus (mzero), guard)
 
 data Primitive = Primitive {
-  pInns :: [String],
-  pOuts :: [String],
+  pInns :: [IArg],
+  pOuts :: [IArg],
   pEval :: FactoryValue }
 
 foldL2FactoryValue :: (Value -> Value -> Value) -> Value -> FactoryValue
@@ -38,41 +38,41 @@ doOutput v = do
 
 primitives :: Map.Map String Primitive
 primitives = Map.fromList [
-    ("+", Primitive ["a", "b"] ["result"] $ arithFoldL2FactoryValue (+) 0),
-    ("-", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue (-)),
-    ("*", Primitive ["a", "b"] ["result"] $ arithFoldL2FactoryValue (*) 1),
-    ("/", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue div),
-    ("==", Primitive ["a", "b"] ["result"] $ arith2Ope2FactoryValue (\a b -> if a == b then 1 else 0)),
-    ("++", Primitive ["a", "b"] ["result"] $ foldL2FactoryValue (\(VString x) (VString y) -> VString (x ++ y)) $ VString ""),
-    ("output", Primitive ["a"] [] $ \_ [(_, v)] _ _ _ -> do
+    ("+", Primitive [ISpread "arg"] [IArg "result"] $ arithFoldL2FactoryValue (+) 0),
+    ("-", Primitive [IArg "arg0", IArg "arg1"] [IArg "result"] $ arith2Ope2FactoryValue (-)),
+    ("*", Primitive [ISpread "arg"] [IArg "result"] $ arithFoldL2FactoryValue (*) 1),
+    ("/", Primitive [IArg "arg0", IArg "arg1"] [IArg "result"] $ arith2Ope2FactoryValue div),
+    ("==", Primitive [IArg "arg0", IArg "arg1"] [IArg "result"] $ arith2Ope2FactoryValue (\a b -> if a == b then 1 else 0)),
+    ("++", Primitive [ISpread "arg"] [IArg "result"] $ foldL2FactoryValue (\(VString x) (VString y) -> VString (x ++ y)) $ VString ""),
+    ("output", Primitive [IArg "arg0"] [] $ \_ [(_, v)] _ _ _ -> do
       doOutput v
       return (InFlush, OutNoOp, Nothing)),
-    ("trace", Primitive ["a"] ["result"] $ \_ inParticles _ outParticles _ -> do
+    ("trace", Primitive [IArg "arg0"] [IArg "result"] $ \_ inParticles _ outParticles _ -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, Nothing)
       else do
         let [(_, v)] = inParticles
         doOutput v
         return (InFlush, OutAppend [("result", v)], Nothing)),
-    ("merge", Primitive ["a", "b"] ["result"] $ \_ inParticles _ outParticles _ -> do
+    ("merge", Primitive [ISpread "arg"] [IArg "result"] $ \_ inParticles _ outParticles _ -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, Nothing)
       else do
         let (inName, v):rest = inParticles
         return (InRemove inName, OutAppend [("result", v)], Nothing)),
-    ("copy", Primitive ["a"] ["copy0", "copy1"] $ \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
+    ("copy", Primitive [IArg "arg0"] [ISpread "copy"] $ \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, Nothing)
       else do
         return (InFlush, OutAppend $ map (\i -> ("copy" ++ show i, v)) [0..maxOuts - 1], Nothing)),
-    ("if", Primitive ["condition"] ["then", "else"] $ \_ inParticles@[(_, v)] _ outParticles _ -> do
+    ("if", Primitive [IArg "condition"] [IArg "then", IArg "else"] $ \_ inParticles@[(_, v)] _ outParticles _ -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, Nothing)
       else do
         case v of
           VNum 0 -> return (InFlush, OutAppend [("else", v)], Nothing)
           _      -> return (InFlush, OutAppend [("then", v)], Nothing)),
-    ("control", Primitive ["en", "value"] ["result"] $ \ns inParticles _ outParticles _ -> do
+    ("control", Primitive [IArg "en", IArg "value"] [IArg "result"] $ \ns inParticles _ outParticles _ -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, ns)
       else do

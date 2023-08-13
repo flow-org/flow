@@ -24,8 +24,21 @@ nextCounter = modify $ \is -> is { next = next is + 1 }
 modifyContext :: Monad m => (IContext -> IContext) -> StateT IState m ()
 modifyContext f = modify $ \is -> is { context = f $ context is }
 
-matchOutsWithExpectedOuts :: [Exp] -> [IAvailable] -> ([(IAvailable, Exp)], [IAvailable])
-matchOutsWithExpectedOuts a b = fst $ inner a b where
+availableArgToAvailable :: IAvailableArg -> IAvailable
+availableArgToAvailable (IAvailableArg nid (IArg name) c) = IAvailable nid name c
+availableArgToAvailable (IAvailableArg nid (ISpread prefix) c) = IAvailable nid (prefix ++ "0") c
+
+availableArgsToAvailables :: [IAvailableArg] -> Int -> [IAvailable]
+availableArgsToAvailables a b = fst $ inner a b where
+  inner :: [IAvailableArg] -> Int -> ([IAvailable], Int)
+  inner [] n = ([], n)
+  inner (i@(IAvailableArg _ (IArg _) _) : rest) n = let (a, b) = inner rest (n - 1) in (availableArgToAvailable i : a, b)
+  inner (IAvailableArg nid (ISpread prefix) c : rest) n =
+    let (a, b) = inner rest n in
+    (map (\j -> IAvailable nid (prefix ++ show j) c) [0..(b - 1)] ++ a, 0)
+
+matchOutsWithExpectedOuts :: [Exp] -> [IAvailableArg] -> ([(IAvailable, Exp)], [IAvailable])
+matchOutsWithExpectedOuts a b = fst $ inner a (availableArgsToAvailables b (length a)) where
   inner :: [Exp] -> [IAvailable] -> (([(IAvailable, Exp)], [IAvailable]), [Exp])
   inner [] inNodes = (([], inNodes), [])
   inner outs [] = (([], []), outs)
@@ -36,7 +49,7 @@ matchOutsWithExpectedOuts a b = fst $ inner a b where
     case b of
       hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
       [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
-sortExpectedOuts :: [Exp] -> [IAvailable] -> [IAvailable]
+sortExpectedOuts :: [Exp] -> [IAvailableArg] -> [IAvailable]
 sortExpectedOuts exps inNodes =
   let outs = takeWhile (\out -> case out of
             EOut _ _ _ -> True
@@ -51,8 +64,17 @@ sortExpectedOuts exps inNodes =
       let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in
         inNode : inner matched xs
 
-matchInsWithInNodes :: [String] -> [IAvailable] -> [(NodeId, EdgeIndex)]
-matchInsWithInNodes a b = fst $ inner a b where
+argsToStrings :: [IArg] -> Int -> [String]
+argsToStrings a b = fst $ inner a b where
+  inner :: [IArg] -> Int -> ([String], Int)
+  inner [] n = ([], n)
+  inner (IArg name : rest) n = let (a, b) = inner rest (n - 1) in (name : a, b) -- todo: tail rec
+  inner (ISpread prefix : rest) n =
+    let (a, b) = inner rest n in
+    (map (\i -> prefix ++ show i) [0..(b - 1)] ++ a, 0)
+
+matchInsWithInNodes :: [IArg] -> [IAvailable] -> [(NodeId, EdgeIndex)]
+matchInsWithInNodes a b = fst $ inner (argsToStrings a (length b)) b where
   inner :: [String] -> [IAvailable] -> ([(NodeId, EdgeIndex)], [IAvailable])
   inner [] rest = ([], rest)
   inner (inn:xs) inNodes =
@@ -69,7 +91,7 @@ handle e@(EIn seq _ to : rest) ins _ = do
 handle (EMiddle e : rest) ins _ = do
   expectedOuts <- handlePrimitive e ins
   if null rest
-    then return $ Just (head expectedOuts)
+    then return $ Just (availableArgToAvailable $ head expectedOuts)
     else do
       let sorted = sortExpectedOuts rest expectedOuts
       handle rest [] sorted
@@ -89,7 +111,7 @@ handleMultiline :: [[Exp]] -> StateT IState (Either String) ()
 handleMultiline [] = return ()
 handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
 
-handlePrimitive :: Exp -> [IAvailable] -> StateT IState (Either String) [IAvailable]
+handlePrimitive :: Exp -> [IAvailable] -> StateT IState (Either String) [IAvailableArg]
 handlePrimitive (EVar varName) externalIns = do
   let prim = getPrimitive varName
   unless (isJust prim) $ lift $ Left (varName ++ " is not found")
@@ -103,9 +125,9 @@ handlePrimitive (EVar varName) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (IVar varName)
   nextCounter
-  return $ map (\outName -> IAvailable counter outName Nothing) outNames
+  return $ map (\arg -> IAvailableArg counter arg Nothing) outNames
 handlePrimitive (EImm i GMPassive) externalIns = do
-  let edges = matchInsWithInNodes ["a"] externalIns
+  let edges = matchInsWithInNodes [IArg "a"] externalIns
   counter <- next <$> get
   forM_ edges (\(nid, edgeIndex) -> do
     is <- get
@@ -113,13 +135,13 @@ handlePrimitive (EImm i GMPassive) externalIns = do
     modify (\is -> is { currentNodes = newNodes }))
   appendNode (IImm i GMPassive)
   nextCounter
-  return [IAvailable counter "result" Nothing]
+  return [IAvailableArg counter (IArg "result") Nothing]
 handlePrimitive (EImm i gm) externalIns = do
   counter <- next <$> get
   modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
   appendNode (IImm i gm)
   nextCounter
-  return [IAvailable counter "result" Nothing]
+  return [IAvailableArg counter (IArg "result") Nothing]
 handlePrimitive (ERef ref) externalIns = do
   is <- get
   let refList = refs is
@@ -130,7 +152,7 @@ handlePrimitive (ERef ref) externalIns = do
         then
           if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
           else do
-            let edges = matchInsWithInNodes ["refIn"] externalIns
+            let edges = matchInsWithInNodes [IArg "refIn"] externalIns
             forM_ edges (\(nid, edgeIndex) -> do
               is <- get
               let newNodes = appendEdge nid edgeIndex refnid (currentNodes is)
@@ -139,13 +161,13 @@ handlePrimitive (ERef ref) externalIns = do
             return []
         else do
             modify $ \is -> is { refs = Map.alter (\(Just irs) -> Just (irs { usedCount = count + 1 })) ref refList }
-            return [IAvailable refnid ("refOut" ++ show count) Nothing]
+            return [IAvailableArg refnid (IArg $ "refOut" ++ show count) Nothing]
     Nothing -> do
       appendNode (IRef ref)
       if isConsumer
         then do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) 0 True) refList }
-          let edges = matchInsWithInNodes ["refIn"] externalIns
+          let edges = matchInsWithInNodes [IArg "refIn"] externalIns
           forM_ edges (\(nid, edgeIndex) -> do
             is <- get
             let newNodes = appendEdge nid edgeIndex (next is) (currentNodes is)
@@ -155,7 +177,7 @@ handlePrimitive (ERef ref) externalIns = do
         else do
           modify $ \is -> is { refs = Map.insert ref (IRefState (next is) 1 False) refList }
           counter <- next <$> get
-          let newInNodes = [IAvailable counter "refOut0" Nothing]
+          let newInNodes = [IAvailableArg counter (IArg "refOut0") Nothing]
           nextCounter
           return newInNodes
 

@@ -30,6 +30,8 @@ data Command =
   | CExit
   | CLoad String deriving Show
 
+data IArg = IArg String | ISpread String deriving Show
+
 data Intermediate = IVar String | IImm Value GenMode | IRef String | IAddress String deriving Show
 type NodeId = Int
 type EdgeIndex = (String, String)
@@ -39,6 +41,7 @@ data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [Node
 
 -- new
 data IAvailable = IAvailable { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
+data IAvailableArg = IAvailableArg { aFromNid :: NodeId, aFromArg :: IArg, aExpectedToConnectWith :: Maybe String } deriving Show
 
 data IState = IState {
   -- maybe old
