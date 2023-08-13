@@ -62,6 +62,7 @@ data IError =
   | PrimitiveNotFoundError { name :: String, ins :: [IAvailable] }
   -- todo: this error will be deprecated (support multi driven ref)
   | MultiDrivenRefError { info :: ExpInfo, name :: String }
+  | ArgsMatchingError { info :: ExpInfo, args :: [IArg], ins :: [IAvailable] }
   | InternalError { msg :: String, infos :: [ExpInfo] } deriving Show
 
 data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
