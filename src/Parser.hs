@@ -6,8 +6,9 @@ import PEGParser
 import Control.Monad.State (evalStateT)
 import Control.Monad.Trans.State (StateT, get)
 import Debug.Trace
+import Control.Applicative ((<|>))
 
-allowedLetter :: ParseFn Char u n [Char]
+allowedLetter :: ParseM Char u n [Char]
 allowedLetter =
       letter
   <|> digit
@@ -17,19 +18,19 @@ allowedLetter =
   <|> char '/'
   <|> char '-'
 
-var :: ParseFn Char u Exp Exp
+var :: ParseM Char u Exp Exp
 var = useMemo "var" $ EVar <$> many1 allowedLetter
 
-genMode :: ParseFn Char u n EGenMode
+genMode :: ParseM Char u n EGenMode
 genMode = (char '*' >> return EGMAlways) <|> return EGMNormal
 
-number :: ParseFn Char u Exp Exp
+number :: ParseM Char u Exp Exp
 number = useMemo "number" $ do
   x <- many1 digit
   gm <- genMode
   return $ EImm (VNum (read x)) gm
 
-str :: ParseFn Char u Exp Exp
+str :: ParseM Char u Exp Exp
 str = useMemo "string" $ do
   char '"'
   x <- many ((do
@@ -40,25 +41,25 @@ str = useMemo "string" $ do
   gm <- genMode
   return $ EImm (VString (read ("\"" ++ x ++ "\""))) gm -- by using `read`, we can unescape the text
 
-ref :: ParseFn Char u Exp Exp
+ref :: ParseM Char u Exp Exp
 ref = useMemo "ref" $ do
   char '@'
   x <- many1 (letter <|> digit)
   return $ ERef x
 
-address :: ParseFn Char u Exp Exp
+address :: ParseM Char u Exp Exp
 address = useMemo "address" $ do
   char '#'
   x <- many1 (letter <|> digit)
   return $ EAddress x
 
-primitive :: ParseFn Char u Exp Exp
+primitive :: ParseM Char u Exp Exp
 primitive = ref <|> address <|> number <|> str <|> var
 
-middle :: ParseFn Char u Exp [Exp]
+middle :: ParseM Char u Exp [Exp]
 middle = useMemo "middle" (EMiddle <$> primitive) >>= (\head -> manySpaces >> (head :) <$> out)
 
-arrow :: ParseFn Char u Exp ()
+arrow :: ParseM Char u Exp ()
 arrow = char '-' >> char '>' >> return ()
 arrowLabelLeft = (do
   x <- many1 (letter <|> digit)
@@ -69,12 +70,12 @@ arrowLabelRight = (do
   x <- many1 (letter <|> digit)
   return $ Just x) <|> return Nothing
 
-inn :: ParseFn Char u Exp [Exp]
+inn :: ParseM Char u Exp [Exp]
 inn = (useMemo "inn" (do
   char '('
   manySpaces
   seq <- entry
-  ps <- get
+  ps <- pGet
   -- many1Spaces
   label1 <- arrowLabelLeft
   arrow
@@ -83,7 +84,7 @@ inn = (useMemo "inn" (do
   char ')'
   return $ EIn seq label1 label2) >>= (\head -> manySpaces >> (head :) <$> inn)) <|> middle
 
-out :: ParseFn Char u Exp [Exp]
+out :: ParseM Char u Exp [Exp]
 out = (useMemo "out" (inner <|> do
     char '('
     manySpaces
@@ -100,7 +101,7 @@ out = (useMemo "out" (inner <|> do
       seq <- entry
       return $ EOut seq label1 label2
 
-bi :: ParseFn Char u Exp [Exp]
+bi :: ParseM Char u Exp [Exp]
 bi = useMemo "bi" (do
   char '('
   manySpaces
@@ -109,7 +110,7 @@ bi = useMemo "bi" (do
   label2 <- arrowLabelRight
   many1Spaces
   seq <- entry
-  test <- psRest <$> get
+  test <- psRest <$> pGet
   -- many1Spaces
   label3 <- arrowLabelLeft
   arrow
@@ -118,7 +119,7 @@ bi = useMemo "bi" (do
   char ')'
   return $ EBi seq label1 label2 label3 label4) >>= (\head -> manySpaces >> (head :) <$> (bi <|> inn))
 
-entry :: ParseFn Char u Exp [Exp]
+entry :: ParseM Char u Exp [Exp]
 entry = inn
 
 parseCommand = (do
@@ -131,17 +132,17 @@ parseCommand = (do
   <|> (do
     string "load"
     many1Spaces
-    rest <- psRest <$> get
+    rest <- psRest <$> pGet
     return $ CLoad rest)
   <|> (CDecl <$> entry)
 
 parseExp :: [Char] -> Either String [Exp]
-parseExp text = case evalStateT (parseAll entry) (ParseState 0 initMemos text ()) of
+parseExp text = case evalParseM (parseAll entry) (ParseState 0 initMemos text ()) of
   Left ps -> Left . parseError $ ps
   Right e -> Right e
 
 parse :: [Char] -> Either String Command
-parse text = case evalStateT (parseAll parseCommand) (ParseState 0 initMemos text ()) of
+parse text = case evalParseM (parseAll parseCommand) (ParseState 0 initMemos text ()) of
   Left ps -> Left . parseError $ ps
   Right e -> Right e
 
