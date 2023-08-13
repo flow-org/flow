@@ -45,10 +45,10 @@ matchOutsWithExpectedOuts a b = fst <$> inner a (availableArgsToAvailables b (le
   inner outs (inNode:ys) = do
     (a, b) <- spanM (\n -> do
           name <- (case n of
-              (EOut { exFrom = Just x }, _) -> return x
-              (EBi { outFrom =  Just x }, _) -> return x
+              (EOut { exFrom = x }, _) -> return x
+              (EBi { outFrom =  x }, _) -> return x
               (_, info) -> Left info)
-          return $ name /= fromName inNode) outs
+          return $ name /= Just (fromName inNode)) outs
     case b of
       hit:rest -> do
         ((c1, c2), d) <- inner (a ++ rest) ys
