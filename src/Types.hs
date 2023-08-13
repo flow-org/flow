@@ -8,7 +8,8 @@ data ArrowMode = Normal | Buf | Notify deriving Show
 data Arrow =
     AToLeft  ArrowMode (Maybe String) (Maybe String)
   | AToRight ArrowMode (Maybe String) (Maybe String) deriving Show
-data GenMode = GMAlways | GMOnce | GMPassive deriving (Show, Eq)
+data EGenMode = EGMAlways | EGMNormal deriving (Show, Eq)
+data IGenMode = IGMAlways | IGMOnce | IGMPassive deriving (Show, Eq)
 data Value = VNum Int | VString String deriving Eq
 instance Show Value where
   show (VNum i) = show i
@@ -20,7 +21,7 @@ data Exp =
   | EOut { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
   | EBi { exSeq :: [Exp], outFrom :: Maybe String, outTo :: Maybe String, inFrom :: Maybe String, inTo :: Maybe String }
   | EVar String
-  | EImm Value GenMode
+  | EImm Value EGenMode
   | ERef String
   | EAddress String deriving (Show, Eq)
 data Command = 
@@ -32,7 +33,7 @@ data Command =
 
 data IArg = IArg String | ISpread String deriving Show
 
-data Intermediate = IVar String | IImm Value GenMode | IRef String | IAddress String deriving Show
+data Intermediate = IVar String | IImm Value IGenMode | IRef String | IAddress String deriving Show
 type NodeId = Int
 type EdgeIndex = (String, String)
 data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show

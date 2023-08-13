@@ -132,7 +132,7 @@ factoryValue :: Intermediate -> FactoryValue
 factoryValue (IVar v) = case getPrimitive v of
   (Just p) -> pEval p
   _ -> \_ _ _ _ _ -> mzero
-factoryValue (IImm v GMPassive) = \_ inParticles _ outParticles _ -> do
+factoryValue (IImm v IGMPassive) = \_ inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return (InNoOp, OutNoOp, Nothing)
   else return (InFlush, OutAppend [("result", v)], Nothing)
@@ -145,11 +145,11 @@ factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
 factoryValue v = \_ _ _ _ _ -> trace (show v) mzero
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> MaybeT IO OutOp
-factoryGenValue _ (IImm v GMAlways) outParticles _ = do
+factoryGenValue _ (IImm v IGMAlways) outParticles _ = do
   if not $ null outParticles
   then return OutNoOp
   else return $ OutAppend [("result", v)]
-factoryGenValue evc (IImm v GMOnce) outParticles _ =
+factoryGenValue evc (IImm v IGMOnce) outParticles _ =
   if not (null outParticles) || time evc > 0
   then return OutNoOp
   else return $ OutAppend [("result", v)]

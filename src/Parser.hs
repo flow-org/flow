@@ -20,8 +20,8 @@ allowedLetter =
 var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 var = useMemo "var" $ EVar <$> many1 allowedLetter
 
-genMode :: StateT (ParseState Char u n) (Either (Memos Char n)) GenMode
-genMode = (char '!' >> return GMOnce) <|> (char '*' >> return GMAlways) <|> return GMPassive
+genMode :: StateT (ParseState Char u n) (Either (Memos Char n)) EGenMode
+genMode = (char '*' >> return EGMAlways) <|> return EGMNormal
 
 number :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 number = useMemo "number" $ do

@@ -126,20 +126,22 @@ handlePrimitive (EVar varName) externalIns = do
   appendNode (IVar varName)
   nextCounter
   return $ map (\arg -> IAvailableArg counter arg Nothing) outNames
-handlePrimitive (EImm i GMPassive) externalIns = do
+handlePrimitive (EImm i gm) [] = do
+  counter <- next <$> get
+  modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
+  appendNode (IImm i (case gm of
+    EGMAlways -> IGMAlways
+    EGMNormal -> IGMOnce))
+  nextCounter
+  return [IAvailableArg counter (IArg "result") Nothing]
+handlePrimitive (EImm i EGMNormal) externalIns = do
   let edges = matchInsWithInNodes [IArg "a"] externalIns
   counter <- next <$> get
   forM_ edges (\(nid, edgeIndex) -> do
     is <- get
     let newNodes = appendEdge nid edgeIndex counter (currentNodes is)
     modify (\is -> is { currentNodes = newNodes }))
-  appendNode (IImm i GMPassive)
-  nextCounter
-  return [IAvailableArg counter (IArg "result") Nothing]
-handlePrimitive (EImm i gm) externalIns = do
-  counter <- next <$> get
-  modifyContext $ \ic -> ic { genNodes = counter : genNodes ic }
-  appendNode (IImm i gm)
+  appendNode (IImm i IGMPassive)
   nextCounter
   return [IAvailableArg counter (IArg "result") Nothing]
 handlePrimitive (ERef ref) externalIns = do
