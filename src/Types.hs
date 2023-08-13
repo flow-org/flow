@@ -15,18 +15,21 @@ instance Show Value where
   show (VNum i) = show i
   show (VString s) = s
 
+data ExpInfo = ExpInfo { fromPos :: Int, toPos :: Int } deriving (Show, Eq)
+
 data Exp =
-    EMiddle { exPrim :: Exp }
-  | EIn { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
-  | EOut { exSeq :: [Exp], exFrom :: Maybe String, exTo :: Maybe String }
-  | EBi { exSeq :: [Exp], outFrom :: Maybe String, outTo :: Maybe String, inFrom :: Maybe String, inTo :: Maybe String }
-  | EVar String
-  | EImm Value EGenMode
-  | ERef String
+    EMiddle { exPrim :: ExpWithInfo }
+  | EIn { exSeq :: [ExpWithInfo], exFrom :: Maybe String, exTo :: Maybe String }
+  | EOut { exSeq :: [ExpWithInfo], exFrom :: Maybe String, exTo :: Maybe String }
+  | EBi { exSeq :: [ExpWithInfo], outFrom :: Maybe String, outTo :: Maybe String, inFrom :: Maybe String, inTo :: Maybe String }
+  | EVar { exVarName :: String }
+  | EImm { exImm :: Value, exGM :: EGenMode }
+  | ERef { exRefName :: String }
   | EAddress String deriving (Show, Eq)
+type ExpWithInfo = (Exp, ExpInfo)
 data Command = 
-    CImRun [Exp]
-  | CDecl [Exp]
+    CImRun [ExpWithInfo]
+  | CDecl [ExpWithInfo]
   | CRun
   | CExit
   | CLoad String deriving Show

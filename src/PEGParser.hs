@@ -56,6 +56,9 @@ forward i' = do
   ps <- pGet
   pPut $ ps { psPos = psPos ps + i', psRest = drop i' (psRest ps) }
 
+pos :: ParseM t u n Int
+pos = psPos <$> pGet
+
 string :: Eq a => [a] -> ParseM a u n [a]
 string s = do
   ps <- pGet
