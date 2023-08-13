@@ -20,7 +20,7 @@ loop expses = do
   hSetBuffering stdin NoBuffering
   if x == "" then loop expses
   else case parse x of
-    Left a -> print ("parse fail: " ++ a)
+    Left parseError -> putStrLn parseError
     Right a -> (case a of
       CImRun exps -> run [exps] >> loop []
       CDecl newExps -> loop (newExps : expses)
@@ -28,7 +28,7 @@ loop expses = do
       CLoad fileName -> do
         content <- readFile fileName
         case forM (lines content) parseExp of
-          Left a -> print ("parse fail: " ++ a)
+          Left parseError -> putStrLn parseError
           Right a -> run a >> loop []
       CExit -> return ())
 

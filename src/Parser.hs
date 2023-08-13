@@ -7,7 +7,7 @@ import Control.Monad.State (evalStateT)
 import Control.Monad.Trans.State (StateT, get)
 import Debug.Trace
 
-allowedLetter :: StateT (ParseState Char u n) (Either (Memos Char n)) [Char]
+allowedLetter :: ParseFn Char u n [Char]
 allowedLetter =
       letter
   <|> digit
@@ -17,18 +17,19 @@ allowedLetter =
   <|> char '/'
   <|> char '-'
 
-var :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+var :: ParseFn Char u Exp Exp
 var = useMemo "var" $ EVar <$> many1 allowedLetter
 
-genMode :: StateT (ParseState Char u n) (Either (Memos Char n)) EGenMode
+genMode :: ParseFn Char u n EGenMode
 genMode = (char '*' >> return EGMAlways) <|> return EGMNormal
 
-number :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+number :: ParseFn Char u Exp Exp
 number = useMemo "number" $ do
   x <- many1 digit
   gm <- genMode
   return $ EImm (VNum (read x)) gm
 
+str :: ParseFn Char u Exp Exp
 str = useMemo "string" $ do
   char '"'
   x <- many ((do
@@ -39,25 +40,25 @@ str = useMemo "string" $ do
   gm <- genMode
   return $ EImm (VString (read ("\"" ++ x ++ "\""))) gm -- by using `read`, we can unescape the text
 
-ref :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+ref :: ParseFn Char u Exp Exp
 ref = useMemo "ref" $ do
   char '@'
   x <- many1 (letter <|> digit)
   return $ ERef x
-address :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
 
+address :: ParseFn Char u Exp Exp
 address = useMemo "address" $ do
   char '#'
   x <- many1 (letter <|> digit)
   return $ EAddress x
 
-primitive :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) Exp
+primitive :: ParseFn Char u Exp Exp
 primitive = ref <|> address <|> number <|> str <|> var
 
-middle :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+middle :: ParseFn Char u Exp [Exp]
 middle = useMemo "middle" (EMiddle <$> primitive) >>= (\head -> manySpaces >> (head :) <$> out)
 
-arrow :: StateT (ParseState Char u n) (Either (Memos Char n)) ()
+arrow :: ParseFn Char u Exp ()
 arrow = char '-' >> char '>' >> return ()
 arrowLabelLeft = (do
   x <- many1 (letter <|> digit)
@@ -68,7 +69,7 @@ arrowLabelRight = (do
   x <- many1 (letter <|> digit)
   return $ Just x) <|> return Nothing
 
-inn :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
+inn :: ParseFn Char u Exp [Exp]
 inn = (useMemo "inn" (do
   char '('
   manySpaces
@@ -82,7 +83,7 @@ inn = (useMemo "inn" (do
   char ')'
   return $ EIn seq label1 label2) >>= (\head -> manySpaces >> (head :) <$> inn)) <|> middle
 
-out :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+out :: ParseFn Char u Exp [Exp]
 out = (useMemo "out" (inner <|> do
     char '('
     manySpaces
@@ -99,7 +100,7 @@ out = (useMemo "out" (inner <|> do
       seq <- entry
       return $ EOut seq label1 label2
 
-bi :: StateT (ParseState Char u Exp) (Either (Memos Char Exp)) [Exp]
+bi :: ParseFn Char u Exp [Exp]
 bi = useMemo "bi" (do
   char '('
   manySpaces
@@ -117,7 +118,7 @@ bi = useMemo "bi" (do
   char ')'
   return $ EBi seq label1 label2 label3 label4) >>= (\head -> manySpaces >> (head :) <$> (bi <|> inn))
 
-entry :: StateT (ParseState Char d Exp) (Either (Memos Char Exp)) [Exp]
+entry :: ParseFn Char u Exp [Exp]
 entry = inn
 
 parseCommand = (do
@@ -134,10 +135,15 @@ parseCommand = (do
     return $ CLoad rest)
   <|> (CDecl <$> entry)
 
-parseExp text = case evalStateT entry (ParseState 0 initMemos text ()) of
-  Left _ -> Left "parse error"
+parseExp :: [Char] -> Either String [Exp]
+parseExp text = case evalStateT (parseAll entry) (ParseState 0 initMemos text ()) of
+  Left ps -> Left . parseError $ ps
   Right e -> Right e
 
-parse text = case evalStateT parseCommand (ParseState 0 initMemos text ()) of
-  Left _ -> Left "parse error"
+parse :: [Char] -> Either String Command
+parse text = case evalStateT (parseAll parseCommand) (ParseState 0 initMemos text ()) of
+  Left ps -> Left . parseError $ ps
   Right e -> Right e
+
+parseError :: ParseState Char () Exp -> String
+parseError ps = "ParseError: failed to parse " ++ show (head $ psRest ps) ++ " at position " ++ show (psPos ps)
