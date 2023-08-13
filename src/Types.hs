@@ -43,7 +43,6 @@ data INode = INode Intermediate [(EdgeIndex, NodeId)] deriving Show
 data IRefState = IRefState { refNodeId :: NodeId, usedCount :: Int, consumed :: Bool } deriving Show
 data IContext = IContext { addresses :: Map.Map String NodeId, genNodes :: [NodeId] } deriving Show
 
--- new
 data IAvailable = IAvailable { fromNid :: NodeId, fromName :: String, expectedToConnectWith :: Maybe String } deriving Show
 data IAvailableArg = IAvailableArg { aFromNid :: NodeId, aFromArg :: IArg, aExpectedToConnectWith :: Maybe String } deriving Show
 
@@ -54,6 +53,16 @@ data IState = IState {
   next :: NodeId,
   context :: IContext
 } deriving Show
+
+data IError =
+    FailedHandlingExpError { info :: ExpInfo, ins :: [IAvailable], outs :: [IAvailable] }
+  | EmptyHandlingError { ins :: [IAvailable], outs :: [IAvailable] }
+  | FailedHandlingPrimitiveExpError { info :: ExpInfo, ins :: [IAvailable] }
+  -- todo: this error will be deprecated (custom var)
+  | PrimitiveNotFoundError { name :: String, ins :: [IAvailable] }
+  -- todo: this error will be deprecated (support multi driven ref)
+  | MultiDrivenRefError { info :: ExpInfo, name :: String }
+  | InternalError { msg :: String, infos :: [ExpInfo] } deriving Show
 
 data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
 type HalfParticle = (String, Value)

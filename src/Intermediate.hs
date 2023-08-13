@@ -37,28 +37,45 @@ availableArgsToAvailables a b = fst $ inner a b where
     let (a, b) = inner rest n in
     (map (\j -> IAvailable nid (prefix ++ show j) c) [0..(b - 1)] ++ a, 0)
 
-matchOutsWithExpectedOuts :: [Exp] -> [IAvailableArg] -> ([(IAvailable, Exp)], [IAvailable])
-matchOutsWithExpectedOuts a b = fst $ inner a (availableArgsToAvailables b (length a)) where
-  inner :: [Exp] -> [IAvailable] -> (([(IAvailable, Exp)], [IAvailable]), [Exp])
-  inner [] inNodes = (([], inNodes), [])
-  inner outs [] = (([], []), outs)
-  inner outs (inNode:ys) =
-    let (a, b) = span (\n -> (case n of
-          EOut { exFrom = x } -> x
-          EBi { outFrom =  x } -> x) /= Just (fromName inNode)) outs in
+matchOutsWithExpectedOuts :: [ExpWithInfo] -> [IAvailableArg] -> Either ExpInfo ([(IAvailable, ExpWithInfo)], [IAvailable])
+matchOutsWithExpectedOuts a b = fst <$> inner a (availableArgsToAvailables b (length a)) where
+  inner :: [ExpWithInfo] -> [IAvailable] -> Either ExpInfo (([(IAvailable, ExpWithInfo)], [IAvailable]), [ExpWithInfo])
+  inner [] inNodes = return (([], inNodes), [])
+  inner outs [] = return (([], []), outs)
+  inner outs (inNode:ys) = do
+    (a, b) <- spanM (\n -> do
+          name <- (case n of
+              (EOut { exFrom = Just x }, _) -> return x
+              (EBi { outFrom =  Just x }, _) -> return x
+              (_, info) -> Left info)
+          return $ name /= fromName inNode) outs
     case b of
-      hit:rest -> let ((c1, c2), d) = inner (a ++ rest) ys in (((inNode, hit) : c1, c2), d)
-      [] -> let ((c1, c2), head:tail) = inner outs ys in (((inNode, head) : c1, c2), tail)
-sortExpectedOuts :: [Exp] -> [IAvailableArg] -> [IAvailable]
-sortExpectedOuts exps inNodes =
+      hit:rest -> do
+        ((c1, c2), d) <- inner (a ++ rest) ys
+        return (((inNode, hit) : c1, c2), d)
+      [] -> do
+        ((c1, c2), exps) <- inner outs ys
+        case exps of
+          head:tail -> return (((inNode, head) : c1, c2), tail)
+          [] -> Left (ExpInfo (-1) (-1))
+  spanM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
+  spanM _ [] = return ([], [])
+  spanM f (x:xs) = do
+    result <- f x
+    if result then do
+      (a, b) <- spanM f xs
+      return (x : a, b)
+    else return ([], x:xs)
+sortExpectedOuts :: [ExpWithInfo] -> [IAvailableArg] -> Either ExpInfo [IAvailable]
+sortExpectedOuts exps inNodes = do
   let outs = takeWhile (\out -> case out of
-            EOut {} -> True
-            EBi {} -> True
-            _ -> False) exps in
-  let matched = fst $ matchOutsWithExpectedOuts outs inNodes in
-  inner matched outs
+            (EOut {}, _) -> True
+            (EBi {}, _) -> True
+            _ -> False) exps
+  matched <- fst <$> matchOutsWithExpectedOuts outs inNodes
+  return $ inner matched outs
   where
-    inner :: [(IAvailable, Exp)] -> [Exp] -> [IAvailable]
+    inner :: [(IAvailable, ExpWithInfo)] -> [ExpWithInfo] -> [IAvailable]
     inner _ [] = []
     inner matched (x : xs) =
       let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in
@@ -83,18 +100,18 @@ matchInsWithInNodes a b = fst $ inner (argsToStrings a (length b)) b where
       hit:rest -> let (c, d) = inner xs (a ++ rest) in ((fromNid hit, (fromName hit, inn)) : c, d)
       [] -> let (c, head:tail) = inner xs inNodes in ((fromNid head, (fromName head, inn)) : c, tail)
 
-handle :: [ExpWithInfo] -> [IAvailable] -> [IAvailable] -> StateT IState (Either String) (Maybe IAvailable)
+handle :: [ExpWithInfo] -> [IAvailable] -> [IAvailable] -> StateT IState (Either IError) (Maybe IAvailable)
 handle ((EIn { exSeq = seq, exTo = to }, _) : rest) ins _ = do
   result <- handle seq [] []
   let (Just last) = result
   handle rest (last { expectedToConnectWith = to } : ins) []
-handle ((EMiddle { exPrim = e }, _) : rest) ins _ = do
+handle ((EMiddle { exPrim = e }, info) : rest) ins _ = do
   expectedOuts <- handlePrimitive e ins
   if null rest
     then return $ Just (availableArgToAvailable $ head expectedOuts)
-    else do
-      let sorted = sortExpectedOuts (map fst rest) expectedOuts
-      handle rest [] sorted
+    else case sortExpectedOuts rest expectedOuts of
+      Right sorted -> handle rest [] sorted
+      Left info_ -> lift $ Left $ InternalError "sorting outputs error" [info, info_]
 handle ((EOut { exSeq = seq }, _) : rest) _ (headOut : tailOuts) = do
   last <- handle seq [headOut] []
   if null rest
@@ -106,15 +123,18 @@ handle ((EBi { exSeq = seq, inTo = to }, _) : rest) ins (headOut : tailOuts) = d
   result <- handle seq [headOut] []
   let (Just last) = result
   handle rest (last { expectedToConnectWith = to } : ins) tailOuts
+handle ((_, info) : _) ins outs = do
+  lift $ Left $ FailedHandlingExpError info ins outs
+handle [] ins outs = lift $ Left $ EmptyHandlingError ins outs
 
-handleMultiline :: [[ExpWithInfo]] -> StateT IState (Either String) ()
+handleMultiline :: [[ExpWithInfo]] -> StateT IState (Either IError) ()
 handleMultiline [] = return ()
 handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
 
-handlePrimitive :: ExpWithInfo -> [IAvailable] -> StateT IState (Either String) [IAvailableArg]
+handlePrimitive :: ExpWithInfo -> [IAvailable] -> StateT IState (Either IError) [IAvailableArg]
 handlePrimitive (EVar { exVarName = varName }, _) externalIns = do
   let prim = getPrimitive varName
-  unless (isJust prim) $ lift $ Left (varName ++ " is not found")
+  unless (isJust prim) $ lift $ Left $ PrimitiveNotFoundError varName externalIns
   let (Just p) = prim
   let (inNames, outNames) = (pInns p, pOuts p)
   let edges = matchInsWithInNodes inNames externalIns
@@ -144,7 +164,7 @@ handlePrimitive (EImm { exImm = i, exGM = EGMNormal }, _) externalIns = do
   appendNode (IImm i IGMPassive)
   nextCounter
   return [IAvailableArg counter (IArg "result") Nothing]
-handlePrimitive (ERef { exRefName = ref }, _) externalIns = do
+handlePrimitive (ERef { exRefName = ref }, info) externalIns = do
   is <- get
   let refList = refs is
   let isConsumer = length externalIns > 0 -- this check may be inappropriate
@@ -152,7 +172,7 @@ handlePrimitive (ERef { exRefName = ref }, _) externalIns = do
     Just (IRefState refnid count consumed) ->
       if isConsumer
         then
-          if consumed then lift $ Left ("Ref " ++ ref ++ " is already consumed")
+          if consumed then lift $ Left $ MultiDrivenRefError info ref
           else do
             let edges = matchInsWithInNodes [IArg "refIn"] externalIns
             forM_ edges (\(nid, edgeIndex) -> do
@@ -182,15 +202,16 @@ handlePrimitive (ERef { exRefName = ref }, _) externalIns = do
           let newInNodes = [IAvailableArg counter (IArg "refOut0") Nothing]
           nextCounter
           return newInNodes
+handlePrimitive (_, info) externalIns = lift $ Left $ FailedHandlingPrimitiveExpError info externalIns
 
 defaultIState = IState Map.empty Map.empty 0 (IContext Map.empty [])
 
-convert :: [ExpWithInfo] -> Either String (Map.Map Int INode, IContext)
+convert :: [ExpWithInfo] -> Either IError (Map.Map Int INode, IContext)
 convert exps = case execStateT (handle exps [] []) defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
-convertMultiline :: [[ExpWithInfo]] -> Either String (Map.Map Int INode, IContext)
+convertMultiline :: [[ExpWithInfo]] -> Either IError (Map.Map Int INode, IContext)
 convertMultiline exps = case execStateT (handleMultiline exps) defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
