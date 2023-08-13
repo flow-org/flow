@@ -142,7 +142,7 @@ factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
   else do
     -- trace ("ref passed: " ++ name) return ()
     return (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
-factoryValue v = \_ _ _ _ _ -> trace (show v) mzero
+factoryValue v = \_ _ _ _ _ -> trace (show v) mzero -- todo
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> MaybeT IO OutOp
 factoryGenValue _ (IImm v IGMAlways) outParticles _ = do
@@ -153,3 +153,4 @@ factoryGenValue evc (IImm v IGMOnce) outParticles _ =
   if not (null outParticles) || time evc > 0
   then return OutNoOp
   else return $ OutAppend [("result", v)]
+factoryGenValue _ v _ _ = trace (show v) mzero -- todo
