@@ -56,10 +56,9 @@ data IState = IState {
 
 data IError =
     FailedHandlingExpError { info :: ExpInfo, ins :: [IAvailable], outs :: [IAvailable] }
-  | EmptyHandlingError { ins :: [IAvailable], outs :: [IAvailable] }
   | FailedHandlingPrimitiveExpError { info :: ExpInfo, ins :: [IAvailable] }
   -- todo: this error will be deprecated (custom var)
-  | PrimitiveNotFoundError { name :: String, ins :: [IAvailable] }
+  | PrimitiveNotFoundError { info :: ExpInfo, name :: String, ins :: [IAvailable] }
   -- todo: this error will be deprecated (support multi driven ref)
   | MultiDrivenRefError { info :: ExpInfo, name :: String }
   | ArgsMatchingError { info :: ExpInfo, args :: [IArg], ins :: [IAvailable] }

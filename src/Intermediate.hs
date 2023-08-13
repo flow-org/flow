@@ -126,16 +126,12 @@ handle ((EBi { exSeq = seq, inTo = to }, _) : rest) ins (headOut : tailOuts) = d
   handle rest (last { expectedToConnectWith = to } : ins) tailOuts
 handle ((_, info) : _) ins outs = do
   lift $ Left $ FailedHandlingExpError info ins outs
-handle [] ins outs = lift $ Left $ EmptyHandlingError ins outs
-
-handleMultiline :: [[ExpWithInfo]] -> StateT IState (Either IError) ()
-handleMultiline [] = return ()
-handleMultiline (x:xs) = handle x [] [] >> handleMultiline xs
+handle [] ins outs = lift $ Left $ InternalError "empty handling" []
 
 handlePrimitive :: ExpWithInfo -> [IAvailable] -> StateT IState (Either IError) [IAvailableArg]
 handlePrimitive (EVar { exVarName = varName }, info) externalIns = do
   let prim = getPrimitive varName
-  unless (isJust prim) $ lift $ Left $ PrimitiveNotFoundError varName externalIns
+  unless (isJust prim) $ lift $ Left $ PrimitiveNotFoundError info varName externalIns
   let (Just p) = prim -- exhaustive because of the unless guard above
   let (inNames, outNames) = (pInns p, pOuts p)
   case matchInsWithInNodes inNames externalIns of
@@ -220,7 +216,29 @@ convert exps = case execStateT (handle exps [] []) defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
 
-convertMultiline :: [[ExpWithInfo]] -> Either IError (Map.Map Int INode, IContext)
-convertMultiline exps = case execStateT (handleMultiline exps) defaultIState of
+convertMultiline :: [(String, [ExpWithInfo])] -> Either String (Map.Map Int INode, IContext)
+convertMultiline exps = case inner exps defaultIState of
   Left err -> Left err
   Right is -> Right (currentNodes is, context is)
+  where
+    inner :: [(String, [ExpWithInfo])] -> IState -> Either String IState
+    inner [] s = Right s
+    inner ((raw, x):xs) s = case execStateT (handle x [] []) s of
+      Right newState -> inner xs newState
+      Left err -> Left $ handleError err raw
+
+infoToString :: ExpInfo -> String -> String
+infoToString (ExpInfo from to) s = take (to - from) (drop (from - 1) s) ++ " from: " ++ show from ++ " to: " ++ show to
+handleError :: IError -> String -> String
+handleError (FailedHandlingExpError info ins outs) s =
+  "Failed to handle the expression " ++ infoToString info s ++ ".\ninternal: " ++ show ins ++ "\n" ++ show outs
+handleError (FailedHandlingPrimitiveExpError info ins) s =
+  "Failed to handle the primitive expression " ++ infoToString info s ++ ".\ninternal: " ++ show ins
+handleError (PrimitiveNotFoundError info name ins) s =
+  "The primitive " ++ name ++ " is not found. " ++ infoToString info s ++"\ninternal: " ++ show ins
+handleError (MultiDrivenRefError info name) s =
+  "The ref " ++ name ++ " is multi-driven. " ++ infoToString info s
+handleError (ArgsMatchingError info args ins) s =
+  "The arguments of " ++ infoToString info s ++ " is not appropriate. Args: " ++ show args ++ "\ninternal: " ++ show ins
+handleError (InternalError msg infos) s =
+  "Sorry, an internal error occurred. " ++ msg ++ "\ndump: " ++ show (map (\i -> infoToString i s) infos)

@@ -13,6 +13,7 @@ import Control.Monad (forM)
 main :: IO ()
 main = loop []
 
+loop :: [(String, [ExpWithInfo])] -> IO ()
 loop expses = do
   hSetBuffering stdin LineBuffering
   putStr "> "
@@ -22,18 +23,19 @@ loop expses = do
   else case parse x of
     Left parseError -> putStrLn parseError
     Right a -> (case a of
-      CImRun exps -> run [exps] >> loop []
-      CDecl newExps -> loop (newExps : expses)
+      CImRun exps -> run [(x, exps)] >> loop []
+      CDecl newExps -> loop ((x, newExps) : expses)
       CRun -> run expses >> loop []
       CLoad fileName -> do
         content <- readFile fileName
-        case forM (lines content) parseExp of
+        case forM (lines content) (\x -> parseExp x >>= (\p -> return (x, p))) of
           Left parseError -> putStrLn parseError
-          Right a -> run a >> loop []
+          Right x -> run x >> loop []
       CExit -> return ())
 
+run :: [(String, [ExpWithInfo])] -> IO ()
 run expses = case convertMultiline expses of
-  Left a -> print a
+  Left a -> putStrLn a
   Right (m, ic) -> do
     let graph = toGraph m
     result <- runGraph graph ic
