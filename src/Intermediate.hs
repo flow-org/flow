@@ -78,7 +78,7 @@ sortExpectedOuts exps inNodes = do
     inner :: [(IAvailable, ExpWithInfo)] -> [ExpWithInfo] -> [IAvailable]
     inner _ [] = []
     inner matched (x : xs) =
-      let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in
+      let (Just (inNode, _)) = find (\(_, e) -> e == x) matched in -- todo: exhaustive
         inNode : inner matched xs
 
 argsToStrings :: [IArg] -> Int -> [String]
@@ -135,7 +135,7 @@ handlePrimitive :: ExpWithInfo -> [IAvailable] -> StateT IState (Either IError) 
 handlePrimitive (EVar { exVarName = varName }, _) externalIns = do
   let prim = getPrimitive varName
   unless (isJust prim) $ lift $ Left $ PrimitiveNotFoundError varName externalIns
-  let (Just p) = prim
+  let (Just p) = prim -- exhaustive because of the unless guard above
   let (inNames, outNames) = (pInns p, pOuts p)
   let edges = matchInsWithInNodes inNames externalIns
   counter <- next <$> get
