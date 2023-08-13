@@ -228,7 +228,7 @@ convertMultiline exps = case inner exps defaultIState of
       Left err -> Left $ handleError err raw
 
 infoToString :: ExpInfo -> String -> String
-infoToString (ExpInfo from to) s = take (to - from) (drop (from - 1) s) ++ " from: " ++ show from ++ " to: " ++ show to
+infoToString (ExpInfo from to) s = take (to - from) (drop from s) ++ " (from " ++ show from ++ " to " ++ show to ++ ")"
 handleError :: IError -> String -> String
 handleError (FailedHandlingExpError info ins outs) s =
   "Failed to handle the expression " ++ infoToString info s ++ ".\ninternal: " ++ show ins ++ "\n" ++ show outs
@@ -239,6 +239,6 @@ handleError (PrimitiveNotFoundError info name ins) s =
 handleError (MultiDrivenRefError info name) s =
   "The ref " ++ name ++ " is multi-driven. " ++ infoToString info s
 handleError (ArgsMatchingError info args ins) s =
-  "The arguments of " ++ infoToString info s ++ " is not appropriate. Args: " ++ show args ++ "\ninternal: " ++ show ins
+  "The arguments of " ++ infoToString info s ++ " is not appropriate. Appropriate args: " ++ show args ++ "\ninternal: " ++ show ins
 handleError (InternalError msg infos) s =
   "Sorry, an internal error occurred. " ++ msg ++ "\ndump: " ++ show (map (\i -> infoToString i s) infos)
