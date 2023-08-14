@@ -65,7 +65,10 @@ data IError =
   | InternalError { msg :: String, infos :: [ExpInfo] } deriving Show
 
 data EvParticle = EvParticle { nodeId :: NodeId, edgeIndex :: EdgeIndex, particleValue :: Value } deriving Show
-type HalfParticle = (String, Value)
+data HalfParticle = HalfParticle String Value deriving (Show, Eq)
+instance Ord HalfParticle where
+  compare (HalfParticle a _) (HalfParticle b _) = compare a b
+
 newtype EvNodeState = EvNSControl Value deriving Show
 data EvContext = EvContext { particles :: [EvParticle], time :: Int, nodeStates :: Map.Map NodeId EvNodeState } deriving Show
 data EvState = EvState { graph :: Gr Intermediate EdgeIndex, ic :: IContext, evc :: EvContext }

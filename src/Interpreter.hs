@@ -33,18 +33,18 @@ toGraph :: Map.Map Int INode -> Gr Intermediate EdgeIndex
 toGraph m = mkGraph (nodes m) (edges m)
 
 toHalfInParticles :: [EvParticle] -> [HalfParticle]
-toHalfInParticles = map $ \(EvParticle nid (_, inName) v) -> (inName, v)
+toHalfInParticles = map $ \(EvParticle nid (_, inName) v) -> HalfParticle inName v
 toHalfOutParticles :: [EvParticle] -> [HalfParticle]
-toHalfOutParticles = map $ \(EvParticle nid (outName, _) v) -> (outName, v)
+toHalfOutParticles = map $ \(EvParticle nid (outName, _) v) -> HalfParticle outName v
 
 toFullInParticles :: [LEdge EdgeIndex] -> [HalfParticle] -> [EvParticle]
-toFullInParticles inns = mapMaybe (\(idx, v) -> case find (\(_, _, (_, inName)) -> inName == idx) inns of
+toFullInParticles inns = mapMaybe (\(HalfParticle idx v) -> case find (\(_, _, (_, inName)) -> inName == idx) inns of
                                                   Just (_, nextNid, eidx) -> Just (EvParticle nextNid eidx v)
                                                   Nothing -> Nothing)
 -- toFullInParticles nid = map $ \(eidx, v) -> EvParticle nid eidx v
 -- todo
 toFullOutParticles :: [LEdge EdgeIndex] -> [HalfParticle] -> [EvParticle]
-toFullOutParticles outs = mapMaybe (\(idx, v) -> case find (\(_, _, (outName, _)) -> outName == idx) outs of
+toFullOutParticles outs = mapMaybe (\(HalfParticle idx v) -> case find (\(_, _, (outName, _)) -> outName == idx) outs of
                                                   Just (_, nextNid, eidx) -> Just (EvParticle nextNid eidx v)
                                                   Nothing -> Nothing)
 -- toFullOutParticles outs hps = map (\((_, v), (_, nextNid, eidx)) -> EvParticle nextNid eidx v) $ zip hps outs
@@ -117,7 +117,7 @@ factoryByNid graph evc nid = do
 
 handleInOp :: InOp -> [HalfParticle] -> [HalfParticle]
 handleInOp InFlush _ = []
-handleInOp (InRemove key) l = filter (\(inName, _) -> inName /= key) l
+handleInOp (InRemove key) l = filter (\(HalfParticle inName _) -> inName /= key) l
 handleInOp InNoOp l = l
 
 -- handleOutOp :: OutOp -> [HalfParticle] -> [HalfParticle]
@@ -135,22 +135,22 @@ factoryValue (IVar v) = case getPrimitive v of
 factoryValue (IImm v IGMPassive) = \_ inParticles _ outParticles _ -> do
   if not $ null outParticles
   then return (InNoOp, OutNoOp, Nothing)
-  else return (InFlush, OutAppend [("result", v)], Nothing)
-factoryValue (IRef name) = \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
+  else return (InFlush, OutAppend [HalfParticle "result" v], Nothing)
+factoryValue (IRef name) = \_ inParticles@[HalfParticle _ v] _ outParticles maxOuts -> do
   if not $ null outParticles
   then return (InNoOp, OutNoOp, Nothing)
   else do
     -- trace ("ref passed: " ++ name) return ()
-    return (InFlush, OutAppend $ map (\i -> ("refOut" ++ show i, v)) [0..maxOuts - 1], Nothing)
+    return (InFlush, OutAppend $ map (\i -> HalfParticle ("refOut" ++ show i) v) [0..maxOuts - 1], Nothing)
 factoryValue v = \_ _ _ _ _ -> trace (show v) mzero -- todo
 
 factoryGenValue :: EvContext -> Intermediate -> [HalfParticle] -> Int -> MaybeT IO OutOp
 factoryGenValue _ (IImm v IGMAlways) outParticles _ = do
   if not $ null outParticles
   then return OutNoOp
-  else return $ OutAppend [("result", v)]
+  else return $ OutAppend [HalfParticle "result" v]
 factoryGenValue evc (IImm v IGMOnce) outParticles _ =
   if not (null outParticles) || time evc > 0
   then return OutNoOp
-  else return $ OutAppend [("result", v)]
+  else return $ OutAppend [HalfParticle "result" v]
 factoryGenValue _ v _ _ = trace (show v) mzero -- todo
