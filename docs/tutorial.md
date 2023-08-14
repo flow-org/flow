@@ -3,7 +3,7 @@
 ## 実行手順
 
 ```bash
-$ cabel repl
+$ cabal repl
 ghci> :l app/Main.hs
 ghci> main
 > // ここでプログラムを記述する
