@@ -38,7 +38,7 @@ availableArgsToAvailables a b = fst $ inner a b where
     (map (\j -> IAvailable nid (prefix ++ show j) c) [0..(b - 1)] ++ a, 0)
 
 matchOutsWithExpectedOuts :: [ExpWithInfo] -> [IAvailableArg] -> Either ExpInfo ([(IAvailable, ExpWithInfo)], [IAvailable])
-matchOutsWithExpectedOuts a b = fst <$> inner a (availableArgsToAvailables b (length a)) where
+matchOutsWithExpectedOuts a b = fst <$> inner a (reverse (availableArgsToAvailables b (length a))) where
   inner :: [ExpWithInfo] -> [IAvailable] -> Either ExpInfo (([(IAvailable, ExpWithInfo)], [IAvailable]), [ExpWithInfo])
   inner [] inNodes = return (([], inNodes), [])
   inner outs [] = return (([], []), outs)
@@ -109,7 +109,7 @@ handle ((EIn { exSeq = seq, exTo = to }, _) : rest) ins _ = do
 handle ((EMiddle { exPrim = e }, info) : rest) ins _ = do
   expectedOuts <- handlePrimitive e ins
   if null rest
-    then return $ Just (availableArgToAvailable $ head expectedOuts)
+    then return $ Just (availableArgToAvailable $ head expectedOuts) -- todo: handle if expectedOuts = []
     else case sortExpectedOuts rest expectedOuts of
       Right sorted -> handle rest [] sorted
       Left info_ -> lift $ Left $ InternalError "sorting outputs error" [info, info_]
