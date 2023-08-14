@@ -144,14 +144,14 @@ parseCommand = (do
   <|> (CDecl <$> entry)
 
 parseExp :: [Char] -> Either String [ExpWithInfo]
-parseExp text = case evalParseM (parseAll entry) (ParseState 0 initMemos text ()) of
+parseExp text = case evalParseM (parseAll entry) (ParseState 0 initMemos text () 0) of
   Left ps -> Left . parseError $ ps
   Right e -> Right e
 
 parse :: [Char] -> Either String Command
-parse text = case evalParseM (parseAll parseCommand) (ParseState 0 initMemos text ()) of
+parse text = case evalParseM (parseAll parseCommand) (ParseState 0 initMemos text () 0) of
   Left ps -> Left . parseError $ ps
   Right e -> Right e
 
-parseError :: ParseState Char () v -> String
-parseError ps = "ParseError: failed to parse " ++ show (head $ psRest ps) ++ " at position " ++ show (psPos ps)
+parseError :: ParseState Char () ExpWithInfo -> String
+parseError ps = "ParseError: failed to parse " ++ show  (psRest ps !! (psMaxPos ps - psPos ps)) ++ " at position " ++ show (psMaxPos ps)

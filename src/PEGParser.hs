@@ -7,6 +7,7 @@ import Data.Char
 import Data.List
 import Control.Applicative (Alternative)
 import GHC.Base (empty, (<|>))
+import Debug.Trace
 
 newtype ParseM t u n r = ParseM (StateT (ParseState t u n) (Either (ParseState t u n)) r) deriving Functor
 runParseM :: ParseM t u n a -> ParseState t u n -> Either (ParseState t u n) (a, ParseState t u n)
@@ -29,7 +30,9 @@ instance Alternative (ParseM t u n) where
   -- todo: actually, this is not a unit.
   empty = ParseM (get >>= lift . Left)
   (ParseM (StateT a)) <|> (ParseM (StateT b)) = ParseM $ StateT $ \ps -> case a ps of
-      Left (ParseState { psMemos = memos }) -> b (ps { psMemos = memos })
+      Left failPS1@ParseState { psMemos = memos, psMaxPos = pos1 } -> case b (ps { psMemos = memos }) of
+        Left failPS2@ParseState { psMaxPos = pos2 } -> Left $ failPS2 { psMaxPos = max pos1 pos2 }
+        Right (a, ps@ParseState { psMaxPos = pos2 }) -> Right (a, ps { psMaxPos = max pos1 pos2 })
       y -> y
 
 type MemoItem t u n = Either (ParseState t u n) (Int, n)
@@ -42,19 +45,20 @@ addMemo memos i label result = Map.insert (i, label) result memos
 initMemos :: Memos t u n
 initMemos = Map.empty
 
-data ParseState t u n = ParseState { psPos :: Int, psMemos :: Memos t u n, psRest :: [t], psExtra :: u }
+data ParseState t u n = ParseState { psPos :: Int, psMemos :: Memos t u n, psRest :: [t], psExtra :: u, psMaxPos :: Int } deriving Show
 useMemo :: (Ord t) => [t] -> ParseM t u n n -> ParseM t u n n
-useMemo label p = ParseM $ StateT $ \(ParseState i memos xs extra) -> case findMemo memos i label of
-  Just (Right (i', node)) -> Right (node, ParseState i' memos (drop (i' - i) xs) extra)
+useMemo label p = ParseM $ StateT $ \(ParseState i memos xs extra j) -> case findMemo memos i label of
+  Just (Right (i', node)) -> Right (node, ParseState i' memos (drop (i' - i) xs) extra (max i' j))
   Just (Left ps) -> Left ps
-  Nothing -> case runParseM p (ParseState i memos xs extra) of
+  Nothing -> case runParseM p (ParseState i memos xs extra j) of
     Left ps -> Left $ ps { psMemos = addMemo (psMemos ps) i label (Left ps) }
     Right (a, ps) -> Right (a, ps { psMemos = addMemo (psMemos ps) i label (Right (psPos ps, a)) })
 
 forward :: Int -> ParseM t u n ()
 forward i' = do
   ps <- pGet
-  pPut $ ps { psPos = psPos ps + i', psRest = drop i' (psRest ps) }
+  let newPos = psPos ps + i'
+  pPut $ ps { psPos = newPos, psRest = drop i' (psRest ps), psMaxPos = max newPos $ psMaxPos ps }
 
 pos :: ParseM t u n Int
 pos = psPos <$> pGet
