@@ -154,4 +154,7 @@ parse text = case evalParseM (parseAll parseCommand) (ParseState 0 initMemos tex
   Right e -> Right e
 
 parseError :: ParseState Char () ExpWithInfo -> String
-parseError ps = "ParseError: failed to parse " ++ show  (psRest ps !! (psMaxPos ps - psPos ps)) ++ " at position " ++ show (psMaxPos ps)
+parseError ps =
+  let maxPos = psMaxPos ps in
+  replicate (maxPos + 2) ' ' ++ "^\n" ++
+  "ParseError: failed to parse " ++ show  (psRest ps !! (maxPos - psPos ps)) ++ " at position " ++ show maxPos
