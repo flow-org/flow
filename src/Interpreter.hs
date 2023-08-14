@@ -38,15 +38,15 @@ toHalfOutParticles :: [EvParticle] -> [HalfParticle]
 toHalfOutParticles = map $ \(EvParticle nid (outName, _) v) -> (outName, v)
 
 toFullInParticles :: [LEdge EdgeIndex] -> [HalfParticle] -> [EvParticle]
-toFullInParticles inns hps = mapMaybe (\(_, nextNid, eidx@(_, inName)) -> case find (\(idx, _) -> inName == idx) hps of
-                                                                     Just (_, v) -> Just (EvParticle nextNid eidx v)
-                                                                     Nothing -> Nothing) inns
+toFullInParticles inns = mapMaybe (\(idx, v) -> case find (\(_, _, (_, inName)) -> inName == idx) inns of
+                                                  Just (_, nextNid, eidx) -> Just (EvParticle nextNid eidx v)
+                                                  Nothing -> Nothing)
 -- toFullInParticles nid = map $ \(eidx, v) -> EvParticle nid eidx v
 -- todo
 toFullOutParticles :: [LEdge EdgeIndex] -> [HalfParticle] -> [EvParticle]
-toFullOutParticles outs hps = mapMaybe (\(_, nextNid, eidx@(outName, _)) -> case find (\(idx, _) -> outName == idx) hps of
-                                                                     Just (_, v) -> Just (EvParticle nextNid eidx v)
-                                                                     Nothing -> Nothing) outs
+toFullOutParticles outs = mapMaybe (\(idx, v) -> case find (\(_, _, (outName, _)) -> outName == idx) outs of
+                                                  Just (_, nextNid, eidx) -> Just (EvParticle nextNid eidx v)
+                                                  Nothing -> Nothing)
 -- toFullOutParticles outs hps = map (\((_, v), (_, nextNid, eidx)) -> EvParticle nextNid eidx v) $ zip hps outs
 
 runGraphLoop :: Graph gr => gr Intermediate EdgeIndex -> IContext -> EvContext -> IO (Maybe ())

@@ -5,6 +5,7 @@ import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Control.Monad.Trans.Maybe (MaybeT(MaybeT))
 import Control.Monad.Cont (MonadTrans(lift), MonadPlus (mzero), guard)
+import Debug.Trace
 
 data Primitive = Primitive {
   pInns :: [IArg],
