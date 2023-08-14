@@ -1,7 +1,7 @@
 module Primitives where
 
 import Types
-import Data.List (find)
+import Data.List (find, minimumBy)
 import qualified Data.Map.Strict as Map
 import Control.Monad.Trans.Maybe (MaybeT(MaybeT))
 import Control.Monad.Cont (MonadTrans(lift), MonadPlus (mzero), guard)
@@ -59,7 +59,7 @@ primitives = Map.fromList [
       if not $ null outParticles
       then return (InNoOp, OutNoOp, Nothing)
       else do
-        let (inName, v):rest = inParticles
+        let (inName, v) = minimumBy (\(n1, _) (n2, _) -> compare n1 n2) inParticles
         return (InRemove inName, OutAppend [("result", v)], Nothing)),
     ("copy", Primitive [IArg "arg0"] [ISpread "copy"] $ \_ inParticles@[(_, v)] _ outParticles maxOuts -> do
       if not $ null outParticles

@@ -44,6 +44,7 @@ run expses = case convertMultiline expses of
       Nothing -> putStrLn "terminated"
 
 -- checks
+-- let (Right (CDecl x)) = parse "(1 ->:arg1) (2 ->:arg0) (3 ->:arg2) merge -> output" in convert x
 -- let (Right x) = parse "1! -> if (then:-> 2 -> output) (else:-> 3 -> output)" in convert x
 -- let (Right x) = parse "@a -> (1! ->) merge -> (1* ->) + -> trace -> @a" in convert x
 -- let (Right x) = parse "@current -> (5! ->) == -> if (then:->:en (@result ->) control -> output) (else:-> copy (->:en (@result ->) control -> @next) (->:en (@current -> (1* ->) + ->) control -> @current))" in x
