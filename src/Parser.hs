@@ -27,10 +27,19 @@ var = useMemo "var" $ withInfo $ EVar <$> varName
 ope :: ParseM Char u ExpWithInfo ExpWithInfo
 ope = useMemo "ope" $ withInfo $ EVar <$> (
   (char '=' >> char '=' >> return "==")
+  <|> (char '!' >> char '=' >> return "!=")
+  <|> (char '>' >> char '=' >> return ">=")
+  <|> (char '<' >> char '=' >> return "<=")
+  <|> (char '+' >> char '+' >> return "++")
+  <|> (char '&' >> char '&' >> return "&&")
+  <|> (char '|' >> char '|' >> return "||")
   <|> char '+'
+  <|> char '-'
   <|> char '*'
   <|> char '/'
-  <|> char '-')
+  <|> char '%'
+  <|> char '>'
+  <|> char '<')
 
 number :: ParseM Char u ExpWithInfo ExpWithInfo
 number = useMemo "number" $ withInfo $ do
@@ -138,7 +147,7 @@ infixl5Opes = string "++"
 infixl5 :: ParseM Char u ExpWithInfo ExpWithInfo
 infixl5 = useMemo "infixl5" $ infixlFactory infixl5Opes infixl6
 
-infixl4Opes = string "==" <|> string "!=" <|> string ">=" <|> string "<="
+infixl4Opes = string "==" <|> string "!=" <|> string ">=" <|> string "<=" <|> char '>' <|> char '<'
 infixl4 :: ParseM Char u ExpWithInfo ExpWithInfo
 infixl4 = useMemo "infixl4" $ infixlFactory infixl4Opes infixl5
 
