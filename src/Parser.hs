@@ -190,11 +190,15 @@ rightSec =
   <|> rightSecFactory infixl6Opes infixl7
   <|> rightSecFactory infixl5Opes infixl6
   <|> rightSecFactory infixl4Opes infixl5
+  <|> rightSecFactory infixl3Opes infixl4
+  <|> rightSecFactory infixl2Opes infixl3
 leftSec =
       leftSecFactory infixl7Opes infixInner
   <|> leftSecFactory infixl6Opes infixl7
   <|> leftSecFactory infixl5Opes infixl6
   <|> leftSecFactory infixl4Opes infixl5
+  <|> leftSecFactory infixl3Opes infixl4
+  <|> leftSecFactory infixl2Opes infixl3
 
 middle :: ParseM Char u ExpWithInfo [ExpWithInfo]
 middle = withInfo (EMiddle <$> (composed <|> rightSec <|> leftSec <|> ope)) >>= (\head -> manySpaces >> (head :) <$> out)
