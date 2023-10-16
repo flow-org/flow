@@ -104,7 +104,9 @@ pair = useMemo "pair" $ withInfo $ do
 
 parens = do
   char '('
+  manySpaces
   p <- composed
+  manySpaces
   char ')'
   return p
 
@@ -121,6 +123,7 @@ functionApply = withInfo $ do
     return [term])
   return $ EComposed name tail
 
+infixlFactory :: ParseM Char u n String -> ParseM Char u n (Exp, ExpInfo) -> ParseM Char u n (Exp, ExpInfo)
 infixlFactory ope next = do
   start <- pos
   head <- next
@@ -174,9 +177,11 @@ rightSecFactory ope next = withInfo (do
     return x)
 leftSecFactory ope next = withInfo $ do
   char '('
+  manySpaces
   inner <- next
   manySpaces
   ope <- ope
+  manySpaces
   char ')'
   return $ ESectionLeftHand ope inner
 
@@ -201,15 +206,19 @@ arrowType =
 arrow :: ParseM Char u v Arrow
 arrow = do
   label1 <- arrowLabelLeft
+  manySpaces
   arrowType <- arrowType
+  manySpaces
   label2 <- arrowLabelRight
   return $ Arrow arrowType label1 label2
 arrowLabelLeft = (do
   x <- many1 (letter <|> digit)
+  manySpaces
   char ':'
   return $ Just x) <|> return Nothing
 arrowLabelRight = (do
   char ':'
+  manySpaces
   x <- many1 (letter <|> digit)
   return $ Just x) <|> return Nothing
 
@@ -218,8 +227,7 @@ inn = (useMemo "inn" (withInfo $ do
   char '('
   manySpaces
   seq <- entry
-  ps <- pGet
-  -- many1Spaces
+  manySpaces
   arrow <- arrow
   manySpaces
   char ')'
@@ -236,7 +244,7 @@ out = (useMemo "out" (withInfo (inner <|> do
   where
     inner = do
       arrow <- arrow
-      many1Spaces
+      manySpaces
       seq <- entry
       return $ EOut seq arrow
 
@@ -245,10 +253,9 @@ bi = useMemo "bi" (withInfo $ do
   char '('
   manySpaces
   arrow1 <- arrow
-  many1Spaces
+  manySpaces
   seq <- entry
-  test <- psRest <$> pGet
-  -- many1Spaces
+  manySpaces
   arrow2 <- arrow
   manySpaces
   char ')'
@@ -286,6 +293,7 @@ parseCommand =
     rest <- many1 anyChar
     return $ CLoad rest)
   <|> (do
+    manySpaces
     name <- varName
     manySpaces
     ins <- many (do
