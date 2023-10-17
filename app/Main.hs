@@ -15,7 +15,7 @@ import Data.List (intercalate)
 import GHC.GHCi.Helpers (flushAll)
 
 main :: IO ()
-main = putStrLn "flow ver 0.1.0" >> loop Map.empty
+main = putStrLn "flow ver 0.1.1" >> loop Map.empty
 
 appendRoot :: Expses -> Env -> Env
 appendRoot root = Map.insert "root" ([], [], root)
