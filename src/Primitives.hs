@@ -249,7 +249,48 @@ primitives = Map.fromList [
       if not (null outParticles) then return (InNoOp, OutNoOp, ns)
       else case ns of
         Just (EvBlink 1) -> return (InNoOp, OutAppend [HalfParticle "result" $ VNum 1], Just (EvBlink 0))
-        _ -> return (InNoOp, OutAppend [HalfParticle "result" $ VNum 0], Just (EvBlink 1)))
+        _ -> return (InNoOp, OutAppend [HalfParticle "result" $ VNum 0], Just (EvBlink 1))),
+    ("int", Primitive arg1Arity normalResult $ \_ inParticles _ outParticles _ -> do
+      if not $ null outParticles
+      then return (InNoOp, OutNoOp, Nothing)
+      else do
+        let [HalfParticle _ v] = inParticles
+        let newValue =
+              case v of
+                VString s -> VNum (read s)
+                VNum i -> VNum i
+                VBool True -> VNum 1
+                VBool False -> VNum 0
+                VGhost -> VGhost
+                _ -> VNum undefined
+        return (InFlush, OutAppend [HalfParticle "result" newValue], Nothing)),
+    ("str", Primitive arg1Arity normalResult $ \_ inParticles _ outParticles _ -> do
+      if not $ null outParticles
+      then return (InNoOp, OutNoOp, Nothing)
+      else do
+        let [HalfParticle _ v] = inParticles
+        let newValue =
+              case v of
+                VGhost -> VGhost
+                _ -> VString (show v)
+        return (InFlush, OutAppend [HalfParticle "result" newValue], Nothing)),
+    ("bool", Primitive arg1Arity normalResult $ \_ inParticles _ outParticles _ -> do
+      if not $ null outParticles
+      then return (InNoOp, OutNoOp, Nothing)
+      else do
+        let [HalfParticle _ v] = inParticles
+        let newValue =
+              case v of
+                VString "" -> VBool False
+                VString _ -> VBool True
+                VNum 0 -> VBool False
+                VNum _ -> VBool True
+                VBool b -> VBool b
+                VGhost -> VGhost
+                VList [] -> VBool False
+                VList _ -> VBool True
+                VPair _ _ -> VBool True
+        return (InFlush, OutAppend [HalfParticle "result" newValue], Nothing))
   ]
 
 getPrimitive :: String -> Maybe Primitive
