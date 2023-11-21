@@ -109,6 +109,14 @@ primitives = Map.fromList [
         let [HalfParticle _ v] = inParticles
         doOutput v
         return (InFlush, OutAppend [HalfParticle "result" v], Nothing)),
+    ("input", Primitive (INormalArgs ["request"]) normalResult $ \_ inParticles _ outParticles _ -> do
+      if not $ null outParticles
+      then return (InNoOp, OutNoOp, Nothing)
+      else do
+        lift $ putStr "Input: "
+        lift flushAll
+        c <- lift getLine
+        return (InFlush, OutAppend [HalfParticle "result" (VString c)], Nothing)),
     ("merge", Primitive argSpread normalResult $ \ns inParticles inns outParticles _ -> do
       if not $ null outParticles
       then return (InNoOp, OutNoOp, ns)
