@@ -72,7 +72,11 @@ ref = useMemo "ref" $ withInfo (do
     return $ ERef name (Just exp)) <|> return (ERef name Nothing))
 
 list :: ParseM Char u ExpWithInfo ExpWithInfo
-list = useMemo "list" $ withInfo $ do
+list = useMemo "list" $ withInfo $ (do
+  char '['
+  manySpaces
+  char ']'
+  return $ EImm (VList [])) <|> do
   char '['
   manySpaces
   head <- primitiveAtom
